@@ -8,11 +8,9 @@ import os
 from datetime import datetime, timedelta
 from log_setup import get_logger
 from utils import send_dingding_msg, trading_calendar
+from wencai_utils import WencaiUtils
 import akshare as ak
 import configparser
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib import font_manager
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -28,10 +26,10 @@ class StockPoolConfig:
     INTERVAL_CONFIGS = [
         (2, 10),   # 最近2日前10名
         (3, 10),   # 最近3日前10名  
-        # (5, 10),   # 最近5日前10名
-        # (10, 5),   # 最近10日前5名
-        # (15, 3),   # 最近15日前3名
-        # (20, 2)    # 最近20日前2名
+        (5, 10),   # 最近5日前10名
+        (10, 5),   # 最近10日前5名
+        (15, 3),   # 最近15日前3名
+        (20, 2)    # 最近20日前2名
     ]
     
     # 重要度计算参数
@@ -41,14 +39,8 @@ class StockPoolConfig:
     # 数据保存配置
     DATA_SAVE_DIR = 'data'
     CSV_SUBDIR = 'csv'
-    IMAGES_SUBDIR = 'images'
+    TXT_SUBDIR = 'txt'
     DATA_FILE_PREFIX = 'stock_pool'
-    
-    # 图片生成配置
-    IMAGE_WIDTH = 12  # 图片宽度(英寸)
-    IMAGE_HEIGHT = 8  # 图片高度(英寸) 
-    IMAGE_DPI = 150   # 图片分辨率
-    FONT_SIZE = 14    # 字体大小
     
     @classmethod
     def get_csv_save_path(cls, date_str: str = None) -> str:
@@ -58,15 +50,15 @@ class StockPoolConfig:
         return f"{cls.DATA_SAVE_DIR}/{cls.CSV_SUBDIR}/{cls.DATA_FILE_PREFIX}_{date_str}.csv"
     
     @classmethod
-    def get_image_save_path(cls, date_str: str = None) -> str:
-        """生成图片文件保存路径"""
+    def get_txt_save_path(cls, date_str: str = None) -> str:
+        """生成TXT文件保存路径"""
         if date_str is None:
             date_str = datetime.now().strftime('%Y%m%d')
-        return f"{cls.DATA_SAVE_DIR}/{cls.IMAGES_SUBDIR}/{cls.DATA_FILE_PREFIX}_{date_str}.png"
+        return f"{cls.DATA_SAVE_DIR}/{cls.TXT_SUBDIR}/{cls.DATA_FILE_PREFIX}_{date_str}.txt"
     
     @classmethod 
     def get_data_save_path(cls, date_str: str = None) -> str:
-        """兼容性方法，返回CSV文件保存路径"""
+        """获取主要数据保存路径"""
         return cls.get_csv_save_path(date_str)
     
     # 查询等待时间
@@ -89,13 +81,18 @@ def compare_with_previous_trading_day(current_df: pd.DataFrame, date_str: str = 
     if not previous_date:
         return f"📊 今日股票池更新完成\n数据量: {len(current_df)}只股票\n⚠️ 未找到前一交易日数据"
     
-    previous_file = StockPoolConfig.get_data_save_path(previous_date.strftime('%Y%m%d'))
+    # 查找前一交易日的CSV文件
+    previous_date_str = previous_date.strftime('%Y%m%d')
+    previous_file = StockPoolConfig.get_csv_save_path(previous_date_str)
+    
     if not os.path.exists(previous_file):
         return f"📊 今日股票池更新完成\n数据量: {len(current_df)}只股票\n⚠️ 未找到前一交易日数据文件"
     
     try:
-        previous_df = pd.read_csv(previous_file)
-    except:
+        # 读取CSV文件，指定股票代码列为字符串类型以保持前导零
+        previous_df = pd.read_csv(previous_file, dtype={'code': str, 'market_code': str})
+    except Exception as e:
+        logger.warning(f"读取前一交易日数据失败: {e}")
         return f"📊 今日股票池更新完成\n数据量: {len(current_df)}只股票\n⚠️ 读取前一交易日数据失败"
     
     # 基于股票代码计算变动（确保唯一性）
@@ -150,35 +147,6 @@ def compare_with_previous_trading_day(current_df: pd.DataFrame, date_str: str = 
     return msg
 
 
-def extract_trade_date(df: pd.DataFrame) -> Optional[str]:
-    """
-    从 DataFrame 的列名中提取第一个形如 [YYYYMMDD] 的日期字符串。
-    如果未找到则返回 None。
-    """
-    for col in df.columns:
-        single_date_match = re.search(r'\[(\d{8})\]', col)
-        if single_date_match:
-            return single_date_match.group(1)
-        date_range_match = re.search(r'\[(\d{8}-\d{8})\]', col)
-        if date_range_match:
-            return date_range_match.group(1).split('-')[1]
-    return None
-
-
-def remove_date_suffix(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    删除 DataFrame 列名中形如 [YYYYMMDD]和[YYYYMMDD-YYYYMMDD] 的日期后缀。
-    返回修改后的 DataFrame（不会修改原 df）。
-    """
-    column_mapping = {}
-    for col in df.columns:
-        if re.search(r'\[\d{8}\]', col):
-            new_name = re.sub(r'\[\d{8}\]', '', col)
-            column_mapping[col] = new_name
-        elif re.search(r'\[\d{8}-\d{8}\]', col):
-            new_name = re.sub(r'\[\d{8}-\d{8}\]', '', col)
-            column_mapping[col] = new_name
-    return df.rename(columns=column_mapping)
 
 def calc_importance(df: pd.DataFrame, 
                    alpha: float = None, 
@@ -241,76 +209,8 @@ def calc_importance(df: pd.DataFrame,
     
     return grouped_df[["交易日期", "股票简称", "market_code", "code", "区间信息", "重要度"]]
 
-def get_top_stocks(days: int = 5, rank: int = 5, use_filters: bool = False) -> pd.DataFrame:
-    """
-    获取指定天数内涨幅排名前N的股票数据
-    
-    Args:
-        days: 统计天数
-        rank: 取前N名
-        use_filters: 是否使用筛选条件（非ST、非退市、上市时间>30天、流通市值>100亿）
-    
-    Returns:
-        处理后的股票数据DataFrame
-    """
-    logger.info(f"开始获取{days}日内前{rank}名股票数据, 使用筛选: {use_filters}")
-    start_time = time.time()
-    
-    # 构建查询语句
-    if use_filters:
-        query_text = (f"非ST,股票简称不包含退,上市天数大于30,流通市值大于100亿,"
-                     f"最近{days}个交易日的区间涨跌幅从大到小排序前{rank}")
-    else:
-        query_text = f"最近{days}个交易日的区间涨跌幅从大到小排序前{rank}"
-    
-    logger.info(f"查询语句: {query_text}")
-    
-    try:
-        # 调用问财API获取数据
-        raw_df = pywencai.get(query=query_text, query_type='stock')
-        logger.info(f"原始数据获取成功, 数据量: {len(raw_df)}")
-        
-        # 数据处理
-        df = raw_df.copy()
-        df['交易日期'] = extract_trade_date(df)
-        df = remove_date_suffix(df)
-        
-        # 重命名列
-        column_mapping = {
-            '区间涨跌幅:前复权': '区间涨幅', 
-            '区间涨跌幅:前复权排名': '区间排名'
-        }
-        df.rename(columns=column_mapping, inplace=True)
-        
-        # 添加区间长度
-        df['区间长度'] = days
-        
-        # 数据类型转换
-        # 处理排名列（格式：1/4532 -> 1）
-        df['区间排名'] = (df['区间排名']
-                        .astype(str)
-                        .str.split('/')
-                        .str[0]
-                        .astype(int))
-        
-        # 处理数值列
-        if '区间涨幅' in df.columns:
-            df['区间涨幅'] = df['区间涨幅'].astype(float).round(2)
-        
-        # 处理字符串列
-        for col in ['market_code', 'code']:
-            if col in df.columns:
-                df[col] = df[col].astype(str)
-        
-        # 选择需要的列
-        required_columns = ['交易日期', '股票简称', '区间长度', '区间涨幅', '区间排名', 'market_code', 'code']
-        result = df[required_columns]        
-        return result
-        
-    except Exception as e:
-        logger.error(f"获取股票数据失败: {e}")
-        raise
-    
+
+
 def execute_with_retry(func, *args, **kwargs):
     """
     带重试机制的函数包装器
@@ -369,7 +269,7 @@ def get_stock_pool(selected=False):
         # 使用配置类中的区间设置
         for days, rank in StockPoolConfig.INTERVAL_CONFIGS:
             logger.info(f'========== selected: {selected}  {days}-{rank} ===========')
-            df = execute_with_retry(get_top_stocks, days=days, rank=rank, use_filters=selected)
+            df = execute_with_retry(WencaiUtils.get_top_stocks, days=days, rank=rank, use_filters=selected)
             if df is None or df.empty:
                 raise Exception(f'{(days,rank)}获取数据失败')
             all_df.append(df)
@@ -384,78 +284,44 @@ def get_stock_pool(selected=False):
         logger.error(f"获取股票池失败: {e}")
         return None
 
-def save_stock_pool_image(df: pd.DataFrame, date_str: str = None) -> str:
+def save_stock_pool_codes(df: pd.DataFrame, date_str: str = None) -> str:
     """
-    将股票池保存为表格图片
+    将股票池的代码保存为txt文件
     
     Args:
         df: 包含股票数据的DataFrame
         date_str: 日期字符串，如果为None则使用当前日期
     
     Returns:
-        保存的图片文件路径
+        保存的txt文件路径
     """
     if date_str is None:
         date_str = datetime.now().strftime('%Y%m%d')
     
-    logger.info(f"开始生成股票池图片, 股票数量: {len(df)}")
+    logger.info(f"开始保存股票池代码到txt文件, 股票数量: {len(df)}")
     start_time = time.time()
     
-    # 获取股票简称列表
-    if '股票简称' not in df.columns:
-        raise ValueError("DataFrame中缺少'股票简称'列")
+    # 检查必要的列
+    if 'code' not in df.columns:
+        raise ValueError("DataFrame中缺少'code'列")
     
-    stock_names = df['股票简称'].tolist()
-    
-    # 设置中文字体
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False
-    
-    # 创建图片
-    fig, ax = plt.subplots(figsize=(StockPoolConfig.IMAGE_WIDTH, StockPoolConfig.IMAGE_HEIGHT), 
-                          dpi=StockPoolConfig.IMAGE_DPI)
-    
-    # 隐藏坐标轴
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, len(stock_names))
-    ax.axis('off')
-    
-    # 绘制表格
-    row_height = 1
-    col_width = 1
-    
-    for i, stock_name in enumerate(stock_names):
-        y_pos = len(stock_names) - i - 1  # 从上到下排列
-        
-        # 绘制矩形边框
-        rect = patches.Rectangle((0, y_pos), col_width, row_height, 
-                               linewidth=2, edgecolor='black', facecolor='white')
-        ax.add_patch(rect)
-        
-        # 添加股票名称文本
-        ax.text(0.5, y_pos + 0.5, stock_name, 
-               ha='center', va='center', 
-               fontsize=StockPoolConfig.FONT_SIZE, 
-               color='black', weight='bold')
-    
-    # 调整布局
-    plt.tight_layout()
-    plt.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.05)
+    # 获取股票代码列表，并确保格式正确（6位数字）
+    stock_codes = df['code'].astype(str).str.zfill(6).tolist()
     
     # 确保保存目录存在
-    image_path = StockPoolConfig.get_image_save_path(date_str)
-    image_dir = os.path.dirname(image_path)
-    os.makedirs(image_dir, exist_ok=True)
+    txt_path = StockPoolConfig.get_txt_save_path(date_str)
+    txt_dir = os.path.dirname(txt_path)
+    os.makedirs(txt_dir, exist_ok=True)
     
-    # 保存图片
-    plt.savefig(image_path, dpi=StockPoolConfig.IMAGE_DPI, 
-               bbox_inches='tight', facecolor='white', edgecolor='none')
-    plt.close()
+    # 保存代码到txt文件，每行一个代码
+    with open(txt_path, 'w', encoding='utf-8') as f:
+        for code in stock_codes:
+            f.write(f"{code}\n")
     
     processing_time = time.time() - start_time
-    logger.info(f"股票池图片生成完成, 耗时: {processing_time:.2f}秒, 保存路径: {image_path}")
+    logger.info(f"股票池代码保存完成, 耗时: {processing_time:.2f}秒, 保存路径: {txt_path}")
     
-    return image_path
+    return txt_path
 
 def main():
     """
@@ -514,12 +380,14 @@ def main():
             save_path = StockPoolConfig.get_csv_save_path()
             # 创建所需的目录结构
             os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}", exist_ok=True)
-            os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.IMAGES_SUBDIR}", exist_ok=True)
-            final_df.to_csv(save_path, index=False)
+            os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}", exist_ok=True)
+            
+            # 保存为CSV格式，能更好地保持数据类型
+            final_df.to_csv(save_path, index=False, encoding='utf-8-sig')
 
-            # 步骤6: 保存股票池图片
-            logger.info("步骤6: 保存股票池图片")
-            save_stock_pool_image(final_df)
+            # 步骤6: 保存股票池代码到txt文件
+            logger.info("步骤6: 保存股票池代码到txt文件")
+            save_stock_pool_codes(final_df)
             
             # 步骤7: 发送对比结果通知
             logger.info("步骤7: 发送数据对比结果到钉钉")
