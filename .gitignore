@@ -1,0 +1,107 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Data files
+*.xlsx
+*.xls
+*.csv
+*.json
+*.pkl
+*.h5
+*.hdf5
+*.parquet
+*.feather
+
+# Logs
+*.log
+logs/
+log/
+
+# Configuration files with sensitive data
+cookies.json
+config.json
+secrets.json
+.env
+.env.local
+.env.production
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Financial data (sensitive)
+*.db
+*.sqlite
+*.sqlite3 
+
+tmp.py
+tmp.js
+
+question.text
+test.py
+
+.cursorrules
+data/
