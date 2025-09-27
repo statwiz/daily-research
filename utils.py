@@ -118,5 +118,11 @@ class TradingCalendar:
         return None
 
 
-# 创建全局交易日历实例
-trading_calendar = TradingCalendar()
+
+if __name__ == "__main__":
+    # 创建全局交易日历实例
+    trading_calendar = TradingCalendar()
+    print(trading_calendar.is_trading_day('20250927'))
+    print(trading_calendar.get_previous_trading_day('20250927'))
+
+

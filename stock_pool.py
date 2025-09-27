@@ -7,13 +7,15 @@ import time
 import os
 from datetime import datetime, timedelta
 from log_setup import get_logger
-from utils import send_dingding_msg, trading_calendar
+from utils import send_dingding_msg, TradingCalendar
 from wencai_utils import WencaiUtils
 import akshare as ak
 import configparser
 
 import warnings
 warnings.filterwarnings("ignore")
+
+trading_calendar = TradingCalendar()
 
 # 配置类 - 统一管理所有参数
 class StockPoolConfig:
@@ -27,14 +29,13 @@ class StockPoolConfig:
         (2, 10),   # 最近2日前10名
         (3, 10),   # 最近3日前10名  
         (5, 10),   # 最近5日前10名
-        (10, 5),   # 最近10日前5名
-        (15, 3),   # 最近15日前3名
-        (20, 2)    # 最近20日前2名
+        (10, 10),   # 最近10日前10名
+        (15, 5),   # 最近15日前5名
     ]
     
     # 重要度计算参数
-    IMPORTANCE_ALPHA = 0.999  # 排名权重，越大越强调排名差距
-    IMPORTANCE_BETA = 0.001   # 区间长度权重，越大越强调短区间
+    IMPORTANCE_ALPHA = 0.99  # 排名权重，越大越强调排名差距
+    IMPORTANCE_BETA = 0.01   # 区间长度权重，越大越强调短区间
     
     # 数据保存配置
     DATA_SAVE_DIR = 'data'
@@ -60,6 +61,20 @@ class StockPoolConfig:
     def get_data_save_path(cls, date_str: str = None) -> str:
         """获取主要数据保存路径"""
         return cls.get_csv_save_path(date_str)
+    
+    @classmethod
+    def get_zj_csv_save_path(cls, date_str: str = None) -> str:
+        """生成资金版CSV文件保存路径（大于200亿流通市值）"""
+        if date_str is None:
+            date_str = datetime.now().strftime('%Y%m%d')
+        return f"{cls.DATA_SAVE_DIR}/{cls.CSV_SUBDIR}/{cls.DATA_FILE_PREFIX}_zj_{date_str}.csv"
+    
+    @classmethod
+    def get_zj_txt_save_path(cls, date_str: str = None) -> str:
+        """生成资金版TXT文件保存路径（大于200亿流通市值）"""
+        if date_str is None:
+            date_str = datetime.now().strftime('%Y%m%d')
+        return f"{cls.DATA_SAVE_DIR}/{cls.TXT_SUBDIR}/{cls.DATA_FILE_PREFIX}_zj_{date_str}.txt"
     
     # 查询等待时间
     QUERY_SLEEP_SECONDS = 3
@@ -182,13 +197,11 @@ def calc_importance(df: pd.DataFrame,
         interval_info = "|".join(
             f"{length}-{rank}" for length, rank in zip(sub_df["区间长度"], sub_df["区间排名"])
         )
-        
-        # 重要度计算：使用指数衰减
-        importance_score = float(100 * (
-            np.exp(-alpha * sub_df["区间排名"]) * 
-            np.exp(-beta * sub_df["区间长度"])
-        ).sum())
-        
+        # 重要度计算：使用对数函数
+        importance_score = float(
+            100 * (1 / (np.log1p(sub_df["区间排名"]) * np.log1p(sub_df["区间长度"]))).sum()
+        )
+
         return pd.Series({
             "区间信息": interval_info,
             "重要度": importance_score
@@ -196,7 +209,7 @@ def calc_importance(df: pd.DataFrame,
 
     # 按股票分组并计算重要度
     grouped_df = (
-        df.groupby(["交易日期", "股票简称", "market_code", "code"], as_index=False)
+        df.groupby(["交易日期", "股票简称", "市值Z", "market_code", "code"], as_index=False)
         .apply(aggregate_importance)
     )
 
@@ -207,7 +220,7 @@ def calc_importance(df: pd.DataFrame,
     processing_time = time.time() - start_time
     logger.info(f"重要度计算完成, 耗时: {processing_time:.2f}秒, 结果数量: {len(grouped_df)}")
     
-    return grouped_df[["交易日期", "股票简称", "market_code", "code", "区间信息", "重要度"]]
+    return grouped_df[["交易日期", "股票简称", "市值Z", "market_code", "code", "区间信息", "重要度"]]
 
 
 
@@ -254,7 +267,7 @@ def execute_with_retry(func, *args, **kwargs):
     raise last_exception
     
 
-def get_stock_pool(selected=False):
+def get_stock_pool(selected=None):
     """
     获取股票池数据，通过多个时间区间组合计算重要度
     
@@ -302,7 +315,7 @@ def save_stock_pool_codes(df: pd.DataFrame, date_str: str = None) -> str:
     start_time = time.time()
     
     # 检查必要的列
-    if 'code' not in df.columns:
+    if df.empty or 'code' not in df.columns:
         raise ValueError("DataFrame中缺少'code'列")
     
     # 获取股票代码列表，并确保格式正确（6位数字）
@@ -323,75 +336,186 @@ def save_stock_pool_codes(df: pd.DataFrame, date_str: str = None) -> str:
     
     return txt_path
 
+def save_zj_stock_pool_codes(df: pd.DataFrame, date_str: str = None) -> str:
+    """
+    将资金版股票池的代码保存为txt文件（大于200亿流通市值）
+    
+    Args:
+        df: 包含股票数据的DataFrame
+        date_str: 日期字符串，如果为None则使用当前日期
+    
+    Returns:
+        保存的txt文件路径
+    """
+    if date_str is None:
+        date_str = datetime.now().strftime('%Y%m%d')
+    
+    logger.info(f"开始保存中军版股票池代码到txt文件, 股票数量: {len(df)}")
+    start_time = time.time()
+    
+    # 检查必要的列
+    if df.empty or 'code' not in df.columns:
+        raise ValueError("DataFrame中缺少'code'列")
+    
+    # 获取股票代码列表，并确保格式正确（6位数字）
+    stock_codes = df['code'].astype(str).str.zfill(6).tolist()
+    
+    # 确保保存目录存在
+    txt_path = StockPoolConfig.get_zj_txt_save_path(date_str)
+    txt_dir = os.path.dirname(txt_path)
+    os.makedirs(txt_dir, exist_ok=True)
+    
+    # 保存代码到txt文件，每行一个代码
+    with open(txt_path, 'w', encoding='utf-8') as f:
+        for code in stock_codes:
+            f.write(f"{code}\n")
+    
+    processing_time = time.time() - start_time
+    logger.info(f"中军版股票池代码保存完成, 耗时: {processing_time:.2f}秒, 保存路径: {txt_path}")
+    
+    return txt_path
+
+def collect_stock_pool_data() -> list:
+    """
+    收集所有股票池数据
+    
+    Returns:
+        包含所有股票池DataFrame的列表
+    """
+    data_list = []
+    
+    # 股票池配置：(筛选条件, 描述)
+    pool_configs = [
+        (None, "全量股票池数据"),
+        ('30', "筛选后股票池数据: 自由流通市值>30亿"),  
+        ('60', "筛选后股票池数据: 自由流通市值>60亿"),
+        ('100', "筛选后股票池数据: 自由流通市值>100亿"),
+        ('200', "筛选后股票池数据: 自由流通市值>200亿"),
+    ]
+    
+    for i, (selected, description) in enumerate(pool_configs, 1):
+        step_name = "步骤1" if selected is None else f"步骤2.{i-1}"
+        logger.info(f" ------------ {step_name}: 获取{description} ------------")
+        
+        data = get_stock_pool(selected=selected)
+        if data is None or data.empty:
+            logger.warning(f"{description}获取失败，跳过本次尝试")
+            return None  # 任何一个获取失败就返回None
+        
+        logger.info(f'{description}获取成功, 数据量: {data.shape}')
+        data_list.append(data)
+    
+    return data_list
+
+
+def process_and_merge_data(data_list: list) -> pd.DataFrame:
+    """
+    合并并去重股票池数据
+    
+    Args:
+        data_list: 包含多个股票池DataFrame的列表
+    
+    Returns:
+        去重后按重要度排序的DataFrame
+    """    
+    # 合并所有数据
+    combined_df = pd.concat(data_list, ignore_index=True)
+    
+    # 按股票分组，保留重要度最高的记录
+    groupby_keys = ['交易日期', '股票简称', '市值Z', 'market_code', 'code']
+    max_importance_idx = combined_df.groupby(groupby_keys)['重要度'].idxmax()
+    final_df = (combined_df.loc[max_importance_idx]
+               .sort_values(by='重要度', ascending=False)
+               .reset_index(drop=True))
+    final_df['重要度'] = final_df['重要度'].round(2)
+    
+    return final_df
+
+
+def save_stock_pool_data(final_df: pd.DataFrame, trade_date: str):
+    """
+    保存股票池数据到CSV和TXT文件
+    
+    Args:
+        final_df: 最终的股票池数据
+        trade_date: 交易日期
+    """    
+    # 创建所需的目录结构
+    os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}", exist_ok=True)
+    os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}", exist_ok=True)
+    
+    # 保存主要股票池数据
+    if len(final_df) > 0:
+        save_path = StockPoolConfig.get_csv_save_path(trade_date)
+        final_df.to_csv(save_path, index=False, encoding='utf-8-sig')
+        logger.info(f"主股票池CSV保存完成, 路径: {save_path}")
+    else:
+        logger.warning("没有找到股票，跳过数据保存")
+        return
+    
+    # 筛选大于200亿自由流通市值的股票（资金版）
+    final_zj_df = final_df[final_df['市值Z'] > 100 * 1e8]
+    logger.info(f"筛选出大于100亿自由流通市值的股票数量: {len(final_zj_df)}")
+    
+    # 保存资金版数据
+    if len(final_zj_df) > 0:
+        zj_csv_path = StockPoolConfig.get_zj_csv_save_path(trade_date)
+        final_zj_df.to_csv(zj_csv_path, index=False, encoding='utf-8-sig')
+        logger.info(f"中军版股票池CSV保存完成, 路径: {zj_csv_path}")
+        
+        # 保存资金版股票代码到txt文件
+        save_zj_stock_pool_codes(final_zj_df, trade_date)
+    else:
+        logger.warning("没有找到大于100亿自由流通市值的股票，跳过资金版数据保存")
+    
+    # 保存股票池代码到txt文件
+    logger.info("保存股票池代码到txt文件")
+    save_stock_pool_codes(final_df, trade_date)
+
+
 def main():
     """
     主函数：获取股票池数据并保存
     
     执行流程：
     1. 检查是否为交易日
-    2. 获取全量股票池数据（无筛选）
-    3. 获取筛选后的股票池数据（有筛选条件）  
-    4. 合并数据并去重（同一股票保留重要度最高的记录）
+    2. 收集所有股票池数据（全量+各筛选条件）
+    3. 合并数据并去重（同一股票保留重要度最高的记录）
+    4. 数据对比分析
     5. 保存结果并发送通知
     """
     logger.info("开始执行股票池数据获取任务...")
     
     # 检查是否为交易日
     today = datetime.now().strftime('%Y%m%d')
-    if not trading_calendar.is_trading_day(today):
-        logger.info(f"今日({today})非交易日，跳过执行")
-        return
+    # if not trading_calendar.is_trading_day(today):
+    #     logger.info(f"今日({today})非交易日，跳过执行")
+    #     return
     
     for i in range(StockPoolConfig.MAX_RETRY_COUNT):
         try:
-            # 获取全量数据（无筛选条件）
-            logger.info("步骤1: 获取全量股票池数据")
-            full_data = get_stock_pool(selected=False)
-            if full_data is None or full_data.empty:
-                logger.warning("全量数据获取失败，跳过本次尝试")
+            # 步骤1-2: 收集所有股票池数据
+            data_list = collect_stock_pool_data()
+            if data_list is None:
+                logger.warning("股票池数据收集失败，跳过本次尝试")
                 continue
-            logger.info(f'全量数据获取成功, 数据量: {full_data.shape}')
             
-            # 获取筛选数据（有筛选条件）
-            logger.info("步骤2: 获取筛选后股票池数据")
-            filtered_data = get_stock_pool(selected=True)
-            if filtered_data is None or filtered_data.empty:
-                logger.warning("筛选数据获取失败，跳过本次尝试")
-                continue
-            logger.info(f'筛选数据获取成功, 数据量: {filtered_data.shape}')
-            
-            # 合并并去重处理
-            logger.info("步骤3: 合并数据并去重")
-            combined_df = pd.concat([full_data, filtered_data], ignore_index=True)
-            
-            # 按股票分组，保留重要度最高的记录
-            groupby_keys = ['交易日期', '股票简称', 'market_code', 'code']
-            max_importance_idx = combined_df.groupby(groupby_keys)['重要度'].idxmax()
-            final_df = (combined_df.loc[max_importance_idx]
-                       .sort_values(by='重要度', ascending=False)
-                       .reset_index(drop=True))
+            # 步骤3: 合并并去重处理
+            logger.info(" ------------ 步骤3: 合并数据并去重 ------------")
+            final_df = process_and_merge_data(data_list)
             
             # 步骤4: 数据对比分析
-            logger.info("步骤4: 与前一交易日数据进行对比分析")
-            comparison_msg = compare_with_previous_trading_day(final_df)
+            logger.info("------------ 步骤4: 与前一交易日数据进行对比分析------------")
+            trade_date = final_df['交易日期'].iloc[0]
+            comparison_msg = compare_with_previous_trading_day(final_df, trade_date)
             
-            # 步骤5: 保存数据
-            logger.info("步骤5: 保存数据")
-            save_path = StockPoolConfig.get_csv_save_path()
-            # 创建所需的目录结构
-            os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}", exist_ok=True)
-            os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}", exist_ok=True)
+            # 步骤5-6: 保存数据
+            logger.info("------------ 步骤5: 保存数据------------")
+            save_stock_pool_data(final_df, trade_date)
             
-            # 保存为CSV格式，能更好地保持数据类型
-            final_df.to_csv(save_path, index=False, encoding='utf-8-sig')
-
-            # 步骤6: 保存股票池代码到txt文件
-            logger.info("步骤6: 保存股票池代码到txt文件")
-            save_stock_pool_codes(final_df)
-            
-            # 步骤7: 发送对比结果通知
-            logger.info("步骤7: 发送数据对比结果到钉钉")
-            logger.info(f"任务完成! 最终数据量: {final_df.shape}, 保存路径: {save_path}")
+            # 步骤6: 发送对比结果通知
+            logger.info("------------ 步骤6: 发送数据对比结果到钉钉------------")
+            logger.info(f"任务完成! 最终数据量: {final_df.shape}")
             send_dingding_msg(comparison_msg)
             return  # 成功完成，退出函数
             

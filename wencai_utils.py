@@ -80,7 +80,7 @@ class WencaiUtils:
         return cleaned
  
     @staticmethod
-    def get_top_stocks(days: int = 5, rank: int = 5, use_filters: bool = False) -> pd.DataFrame:
+    def get_top_stocks(days: int = 5, rank: int = 5, use_filters: str = None) -> pd.DataFrame:
         """
         获取指定天数内涨幅排名前N的股票数据
         
@@ -96,11 +96,16 @@ class WencaiUtils:
         start_time = time.time()
         
         # 构建查询语句
-        if use_filters:
-            query_text = (f"非新股,非ST,股票简称不包含退,上市天数大于30,流通市值大于100亿,"
-                         f"最近{days}个交易日的区间涨跌幅从大到小排序前{rank}")
+        if use_filters == '30':
+            query_text = f"非新股,非ST,股票简称不包含退,上市天数大于30,自由流通市值大于30亿,最近{days}个交易日的区间涨跌幅从大到小排序前{rank}"
+        elif use_filters == '60':
+            query_text = f"非新股,非ST,股票简称不包含退,上市天数大于30,自由流通市值大于60亿,最近{days}个交易日的区间涨跌幅从大到小排序前{rank}"
+        elif use_filters == '100':
+            query_text = f"非新股,非ST,股票简称不包含退,上市天数大于30,自由流通市值大于100亿,最近{days}个交易日的区间涨跌幅从大到小排序前{rank}"
+        elif use_filters == '200':
+            query_text = f"非新股,非ST,股票简称不包含退,上市天数大于30,自由流通市值大于200亿,最近{days}个交易日的区间涨跌幅从大到小排序前{rank}"
         else:
-            query_text = f"非新股,最近{days}个交易日的区间涨跌幅从大到小排序前{rank}"
+            query_text = f"非新股,上市天数大于5,自由流通市值大于0,最近{days}个交易日的区间涨跌幅从大到小排序前{rank}"
         
         logger.info(f"查询语句: {query_text}")
         
@@ -117,13 +122,15 @@ class WencaiUtils:
             # 重命名列
             column_mapping = {
                 '区间涨跌幅:前复权': '区间涨幅', 
-                '区间涨跌幅:前复权排名': '区间排名'
+                '区间涨跌幅:前复权排名': '区间排名',
+                '自由流通市值': '市值Z'
             }
             df.rename(columns=column_mapping, inplace=True)
-            
+
+            df = WencaiUtils.clean_dataframe(df, ['市值Z','区间涨幅','区间排名','market_code', 'code'])
+
             # 添加区间长度
-            df['区间长度'] = days
-            
+            df['区间长度'] = days            
             # 数据类型转换
             # 处理排名列（格式：1/4532 -> 1）
             df['区间排名'] = (df['区间排名']
@@ -131,7 +138,6 @@ class WencaiUtils:
                             .str.split('/')
                             .str[0]
                             .astype(int))
-            
             # 处理数值列
             if '区间涨幅' in df.columns:
                 df['区间涨幅'] = df['区间涨幅'].astype(float).round(2)
@@ -140,9 +146,13 @@ class WencaiUtils:
             for col in ['market_code', 'code']:
                 if col in df.columns:
                     df[col] = df[col].astype(str)
+                    
+            for col in ['市值Z']:
+                if col in df.columns:
+                    df[col] = df[col].astype(float).astype(int)
             
             # 选择需要的列
-            required_columns = ['交易日期', '股票简称', '区间长度', '区间涨幅', '区间排名', 'market_code', 'code']
+            required_columns = ['交易日期', '股票简称', '区间长度', '区间涨幅', '区间排名','市值Z', 'market_code', 'code']
             result = df[required_columns]        
             return result
             
@@ -318,8 +328,7 @@ class WencaiUtils:
         logger.info("开始获取今日涨停股票数据")
         start_time = time.time()
         
-        query_text = ("今日涨停,涨跌幅,连续涨停次数,几天几板,涨停时间,涨停类型,"
-                     "涨停原因类别,封单金额,自由流通市值,上市板块")
+        query_text = "今日涨停,涨跌幅,连续涨停次数,几天几板,涨停时间,涨停类型,涨停原因类别,封单金额,自由流通市值,上市板块"
         
         logger.info(f"查询语句: {query_text}")
         
@@ -384,11 +393,169 @@ class WencaiUtils:
         except Exception as e:
             logger.error(f"获取涨停股票数据失败: {e}")
             raise
-
+    
+    @staticmethod
+    def get_dt_stocks() -> pd.DataFrame:
+        """
+        获取今日跌停股票数据，包含跌停相关的详细信息
+        
+        Returns:
+            包含跌停股票数据的DataFrame，包括：
+            - 基础信息：交易日期、股票简称、上市板块
+            - 市值信息：自由流通市值
+            - 跌停信息：涨跌幅、连续跌停次数
+            - 时间信息：首次跌停时间、最终跌停时间
+            - 跌停特征：跌停类型、跌停原因类型
+            - 资金信息：跌停封单额、开板次数
+            - 成交特征：封单量占成交量比、封单量占流通股比
+        """
+        logger.info("开始获取今日跌停股票数据")
+        start_time = time.time()
+        
+        query_text = "今日跌停,涨跌幅,连续跌停天数,跌停类型,跌停原因类型,跌停封单额,自由流通市值,上市板块,跌停时间"
+        
+        logger.info(f"查询语句: {query_text}")
+        
+        try:
+            # 调用问财API获取数据
+            raw_df = pywencai.get(query=query_text, query_type='stock', loop=True)
+            logger.info(f"原始数据获取成功, 数据量: {len(raw_df)}")
+            
+            # 数据处理
+            df = raw_df.copy()
+            trade_date = WencaiUtils.extract_trade_date(df)
+            df = WencaiUtils.remove_date_suffix(df)
+            
+            # 列名映射
+            column_mapping = {
+                '涨跌幅:前复权': '涨跌幅',
+                '自由流通市值': '市值Z',
+                '连续跌停天数': '连板',
+                '跌停开板次数': '开板次数',
+                '跌停封单量占成交量比': '封成量比',
+                '跌停封单量占流通a股比': '封流量比'
+            }
+            df.rename(columns=column_mapping, inplace=True)
+            
+            # 定义数据类型处理列
+            int_columns = ['市值Z', '跌停封单额', '连板', '开板次数']
+            float_columns = ['涨跌幅', '封成量比', '封流量比']
+            str_columns = ['market_code', 'code']
+            
+            # 数据清洗
+            df = WencaiUtils.clean_dataframe(df, int_columns + float_columns + str_columns)
+            
+            # 数据类型转换
+            for col in int_columns:
+                if col in df.columns:
+                    df[col] = df[col].astype(float).astype(int)
+                    
+            for col in float_columns:
+                if col in df.columns:
+                    df[col] = df[col].astype(float).round(2)
+                    
+            for col in str_columns:
+                if col in df.columns:
+                    df[col] = df[col].astype(str)
+            
+            # 添加交易日期
+            df['交易日期'] = trade_date
+            
+            # 选择输出列
+            output_columns = [
+                '交易日期', '股票简称', '上市板块', '市值Z', '涨跌幅', '连板',
+                '首次跌停时间', '跌停类型', '跌停原因类型', '跌停封单额', '最终跌停时间',
+                '开板次数', '封成量比', '封流量比', 'market_code', 'code'
+            ]
+            
+            result = df[output_columns]
+            elapsed_time = time.time() - start_time
+            logger.info(f"跌停股票数据获取完成, 最终数据量: {len(result)}, 耗时: {elapsed_time:.2f}秒")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"获取跌停股票数据失败: {e}")
+            raise
+    
+    @staticmethod
+    def get_zb_stocks() -> pd.DataFrame:
+        """
+        获取今日炸板股票数据（曾涨停但未封住涨停的股票）
+        
+        Returns:
+            包含炸板股票数据的DataFrame，包括：
+            - 基础信息：交易日期、股票简称、上市板块
+            - 市值信息：自由流通市值
+            - 行情信息：最新涨跌幅
+            - 股票代码：market_code、code
+        """
+        logger.info("开始获取今日炸板股票数据")
+        start_time = time.time()
+        
+        query_text = '上市板块,今日曾涨停,自由流通市值,涨跌幅'
+        logger.info(f"查询语句: {query_text}")
+        
+        try:
+            # 调用问财API获取数据
+            raw_df = pywencai.get(query=query_text, query_type='stock', loop=True)
+            logger.info(f"原始数据获取成功, 数据量: {len(raw_df)}")
+            
+            # 数据处理
+            df = raw_df.copy()
+            trade_date = WencaiUtils.extract_trade_date(df)
+            df = WencaiUtils.remove_date_suffix(df)
+            
+            # 列名映射
+            column_mapping = {
+                '涨跌幅:前复权': '涨跌幅',
+                '自由流通市值': '市值Z'
+            }
+            df.rename(columns=column_mapping, inplace=True)
+            
+            # 定义数据类型处理列
+            int_columns = ['市值Z']
+            float_columns = ['涨跌幅']
+            str_columns = ['market_code', 'code']
+            
+            # 数据清洗
+            df = WencaiUtils.clean_dataframe(df, int_columns + float_columns + str_columns)
+            
+            # 数据类型转换
+            for col in int_columns:
+                if col in df.columns:
+                    df[col] = df[col].astype(float).astype(int)
+                    
+            for col in float_columns:
+                if col in df.columns:
+                    df[col] = df[col].astype(float).round(2)
+                    
+            for col in str_columns:
+                if col in df.columns:
+                    df[col] = df[col].astype(str)
+            
+            # 添加交易日期
+            df['交易日期'] = trade_date
+            
+            # 选择输出列
+            output_columns = [
+                '交易日期', '股票简称', '涨跌幅', '市值Z', '上市板块', 
+                'market_code', 'code'
+            ]
+            
+            result = df[output_columns]
+            elapsed_time = time.time() - start_time
+            logger.info(f"炸板股票数据获取完成, 最终数据量: {len(result)}, 耗时: {elapsed_time:.2f}秒")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"获取炸板股票数据失败: {e}")
+            raise
 
 
 
 
 if __name__ == "__main__":
-    df = WencaiUtils.get_zt_stocks()
+    df = WencaiUtils.get_top_stocks(use_filters='200')
     print(df)
