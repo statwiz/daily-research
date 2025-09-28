@@ -12,7 +12,7 @@ from random import randint
 import execjs
 from typing import Optional
 from log_setup import get_logger
-
+from utils import execute_with_retry
 # 设置日志记录器
 logger = get_logger("jygs", "logs", "daily_research.log")
 trading_calendar = TradingCalendar()
@@ -95,7 +95,7 @@ class JygsUtils:
     def _get_single_date_data(session: requests.Session, trading_date: str = None) -> pd.DataFrame:
         """获取指定交易日的异动解析数据"""
         if trading_date is None:
-            recent_days = trading_calendar.get_recent_trading_days(k=1)
+            recent_days = execute_with_retry(trading_calendar.get_recent_trading_days, k=1)
             trading_date = recent_days[0]
             
         logger.info(f"获取{trading_date}异动解析数据")
@@ -250,8 +250,8 @@ class JygsUtils:
     def update_daily_data(trading_date: str, data_dir: str = None, session: requests.Session = None) -> None:
         """保存每日异动数据的主入口函数"""
         try:
-            session = session or JygsUtils._get_session()
-            df = JygsUtils._get_single_date_data(session, trading_date)
+            session = session or execute_with_retry(JygsUtils._get_session)
+            df = execute_with_retry(JygsUtils._get_single_date_data, session, trading_date)
             
             if df.empty:
                 logger.error(f"{trading_date}无异动数据，跳过保存")

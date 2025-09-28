@@ -8,12 +8,16 @@ import pandas as pd
 import numpy as np
 import re
 import time
+import os
 from typing import Optional
 import logging
 from log_setup import get_logger
-# 使用标准的logger命名方式，会自动继承主脚本的日志配置
-# logger = logging.getLogger(__name__)
-logger = get_logger("wencai_utils", "logs", "daily_research.log")
+from utils import execute_with_retry
+
+# 配置常量
+DEFAULT_DATA_DIR = "/Users/thua/Desktop/QFin/daily-research/data/csv"
+
+logger = get_logger("wencai", "logs", "daily_research.log")
 
 class WencaiUtils:
     """问财API工具类"""
@@ -552,10 +556,108 @@ class WencaiUtils:
         except Exception as e:
             logger.error(f"获取炸板股票数据失败: {e}")
             raise
+    
+    @staticmethod
+    def _update_zt_stocks_data(df: pd.DataFrame, trading_date: str, data_dir: str) -> None:
+        """保存涨停数据到历史文件"""
+        try:
+            # 确保ths目录存在
+            ths_dir = os.path.join(data_dir, "ths")
+            os.makedirs(ths_dir, exist_ok=True)
+            
+            # 保存当日涨停数据到独立文件
+            daily_file_path = os.path.join(ths_dir, f"ths_zt_{trading_date}.csv")
+            
+            # 检查文件是否已存在
+            if os.path.exists(daily_file_path):
+                logger.info(f"{trading_date}涨停数据文件已存在，跳过保存: {daily_file_path}")
+                return
+            
+            df.to_csv(daily_file_path, index=False, encoding='utf-8-sig')
+            logger.info(f"保存{trading_date}涨停数据到: {daily_file_path}，共{len(df)}条记录")
+            
+        except Exception as e:
+            logger.error(f"保存{trading_date}涨停数据失败: {e}")
+            raise
 
+    @staticmethod
+    def _update_latest_zt_data(new_data: pd.DataFrame, data_dir: str) -> None:
+        """更新最新涨停数据文件"""
+        try:
+            # 确保ths目录存在
+            ths_dir = os.path.join(data_dir, "ths")
+            os.makedirs(ths_dir, exist_ok=True)
+            
+            latest_file = os.path.join(ths_dir, "ths_zt.csv")
+            
+            if os.path.exists(latest_file):
+                # 读取现有数据
+                existing_df = pd.read_csv(latest_file, dtype={'交易日期': str})
+                
+                # 检查新数据中的日期是否已存在，避免重复添加
+                new_dates = set(new_data['交易日期'].unique())
+                existing_dates = set(existing_df['交易日期'].unique())
+                duplicate_dates = new_dates & existing_dates
+                
+                if duplicate_dates:
+                    logger.info(f"日期 {duplicate_dates} 的数据已存在，跳过重复添加")
+                    return
+                
+                # 合并数据
+                combined_df = pd.concat([existing_df, new_data], ignore_index=True)
+                
+                # 对每只股票只保留最新日期的记录
+                latest_df = combined_df.sort_values('交易日期', ascending=False).groupby('股票简称').first().reset_index()
+            else:
+                latest_df = new_data
+            
+            # 按日期倒序排列（最新日期在最上方）
+            latest_df = latest_df.sort_values('交易日期', ascending=False)
+            
+            # 保存更新后的数据
+            latest_df.to_csv(latest_file, index=False, encoding='utf-8-sig')
+            logger.info(f"更新最新涨停数据到: {latest_file}，共{len(latest_df)}条记录")
+            
+        except Exception as e:
+            logger.error(f"更新最新涨停数据失败: {e}")
+            raise
+
+    @staticmethod
+    def update_daily_zt_data(data_dir: str = None) -> None:
+        """保存每日涨停数据的主入口函数"""
+        try:
+            # 获取涨停数据
+            df = execute_with_retry(WencaiUtils.get_zt_stocks)
+            if df.empty:
+                logger.error("无涨停数据，跳过保存")
+                raise Exception("无涨停数据，跳过保存")
+            
+            # 从数据中提取交易日期
+            trading_date = df['交易日期'].iloc[0]
+            logger.info(f"从数据中提取到交易日期: {trading_date}")
+            
+            # 设置默认数据目录
+            if data_dir is None:
+                data_dir = DEFAULT_DATA_DIR
+            
+            logger.info(f"开始保存{trading_date}的涨停数据，共{len(df)}条记录")
+            
+            # 1. 保存同花顺涨停个股数据到历史文件和当日文件
+            WencaiUtils._update_zt_stocks_data(df, trading_date, data_dir)
+
+            # 2. 更新最新同花顺涨停股票数据文件
+            WencaiUtils._update_latest_zt_data(df, data_dir)
+            
+            logger.info(f"完成{trading_date}同花顺涨停数据保存")
+
+        except Exception as e:
+            logger.error(f"保存每日同花顺涨停数据失败: {e}")
+            raise
+    
+    
 
 
 
 if __name__ == "__main__":
-    df = WencaiUtils.get_top_stocks(use_filters='200')
-    print(df)
+    # 测试：保存涨停数据（交易日期从数据中自动提取）
+    WencaiUtils.update_daily_zt_data()

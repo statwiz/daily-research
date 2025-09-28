@@ -10,6 +10,7 @@ from log_setup import get_logger
 from trading_calendar import TradingCalendar
 from notification import DingDingRobot
 from wencai import WencaiUtils
+from utils import execute_with_retry
 import akshare as ak
 import configparser
 
@@ -226,49 +227,6 @@ def calc_importance(df: pd.DataFrame,
 
 
 
-def execute_with_retry(func, *args, **kwargs):
-    """
-    带重试机制的函数包装器
-    
-    Args:
-        func: 要执行的函数
-        *args, **kwargs: 函数参数
-    
-    Returns:
-        函数执行结果
-        
-    Raises:
-        最后一次失败的异常
-    """
-    last_exception = None
-    retry_count = StockPoolConfig.MAX_RETRY_COUNT
-    func_name = getattr(func, '__name__', str(func))
-    
-    logger.info(f"开始执行函数 {func_name}, 最大重试次数: {retry_count}")
-    
-    for i in range(retry_count):
-        try:
-            logger.debug(f"第{i + 1}次尝试执行 {func_name}")
-            result = func(*args, **kwargs)
-            
-            if i > 0:
-                logger.info(f"函数 {func_name} 在第{i + 1}次尝试后成功执行")
-            
-            return result
-            
-        except Exception as e:
-            last_exception = e
-            if i < retry_count - 1:  # 不是最后一次尝试
-                wait_time = (i + 1) * StockPoolConfig.RETRY_BASE_DELAY
-                logger.warning(f"函数 {func_name} 第{i + 1}次尝试失败，{wait_time}秒后重试: {e}")
-                time.sleep(wait_time)
-            else:
-                logger.error(f"函数 {func_name} 重试{retry_count}次后仍失败: {e}")
-    
-    # 所有重试都失败了，抛出最后的异常
-    raise last_exception
-    
-
 def get_stock_pool(selected=None):
     """
     获取股票池数据，通过多个时间区间组合计算重要度
@@ -284,7 +242,10 @@ def get_stock_pool(selected=None):
         # 使用配置类中的区间设置
         for days, rank in StockPoolConfig.INTERVAL_CONFIGS:
             logger.info(f'========== selected: {selected}  {days}-{rank} ===========')
-            df = execute_with_retry(WencaiUtils.get_top_stocks, days=days, rank=rank, use_filters=selected)
+            df = execute_with_retry(WencaiUtils.get_top_stocks, 
+                                   max_retry_count=StockPoolConfig.MAX_RETRY_COUNT,
+                                   retry_base_delay=StockPoolConfig.RETRY_BASE_DELAY,
+                                   days=days, rank=rank, use_filters=selected)
             if df is None or df.empty:
                 raise Exception(f'{(days,rank)}获取数据失败')
             all_df.append(df)
