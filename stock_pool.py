@@ -7,8 +7,9 @@ import time
 import os
 from datetime import datetime, timedelta
 from log_setup import get_logger
-from utils import send_dingding_msg, TradingCalendar
-from wencai_utils import WencaiUtils
+from trading_calendar import TradingCalendar
+from notification import DingDingRobot
+from wencai import WencaiUtils
 import akshare as ak
 import configparser
 
@@ -16,6 +17,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 trading_calendar = TradingCalendar()
+dingding_robot = DingDingRobot()
 
 # 配置类 - 统一管理所有参数
 class StockPoolConfig:
@@ -516,15 +518,15 @@ def main():
             # 步骤6: 发送对比结果通知
             logger.info("------------ 步骤6: 发送数据对比结果到钉钉------------")
             logger.info(f"任务完成! 最终数据量: {final_df.shape}")
-            send_dingding_msg(comparison_msg)
+            dingding_robot.send_message(comparison_msg, 'robot3')
             return  # 成功完成，退出函数
             
         except Exception as e:
             if i == StockPoolConfig.MAX_RETRY_COUNT - 1:
                 # 最后一次尝试失败
-                error_msg = f"每日复盘 \n 今日股票池更新失败: {e}"
+                error_msg = f"今日股票池更新失败: {e}"
                 logger.error(f"重试{StockPoolConfig.MAX_RETRY_COUNT}次后仍失败: {e}")
-                send_dingding_msg(error_msg)
+                dingding_robot.send_message(error_msg, 'robot3')
             else:
                 # 还有重试机会
                 logger.warning(f"第{i+1}次尝试失败，准备重试: {e}")
