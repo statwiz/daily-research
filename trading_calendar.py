@@ -67,6 +67,16 @@ class TradingCalendar:
         
         return date_obj in self._trading_days
     
+    def get_default_trade_date(self):
+        """获取默认交易日期，延迟初始化"""
+        date_lst = self.get_recent_trading_days(k=1)
+        if date_lst:
+            date_str = date_lst[0]
+        else:
+            date_str = datetime.now().strftime('%Y%m%d')
+        logger.info(f"默认交易日期: {date_str}")
+        return date_str
+    
     def get_previous_trading_day(self, date, max_days_back=10):
         """
         获取指定日期的前一个交易日
@@ -127,11 +137,12 @@ class TradingCalendar:
         
         logger.info(f"获取最近{k}个交易日: {len(result)}天")
         return result
+    
 
 
 if __name__ == "__main__":
     # 测试交易日历功能
     trading_calendar = TradingCalendar()
-    print("测试交易日判断:", trading_calendar.is_trading_day('20250927'))
-    print("测试前一交易日:", trading_calendar.get_previous_trading_day('20250927'))
-    print("测试最近5个交易日:", trading_calendar.get_recent_trading_days(5))
+    # print("测试交易日判断:", trading_calendar.is_trading_day('20250927'))
+    # print("测试前一交易日:", trading_calendar.get_previous_trading_day('20250927'))
+    print("测试最近5个交易日:", trading_calendar.get_recent_trading_days(1))

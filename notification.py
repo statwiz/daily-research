@@ -63,7 +63,7 @@ class DingDingRobot:
             # 自动在内容前添加关键词（如果还没有的话）
             keyword = robot_config['keyword']
             if keyword not in content:
-                final_content = f"【{keyword}】{content}"
+                final_content = f"【{keyword}】\n {content}"
             else:
                 final_content = content
             

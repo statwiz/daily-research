@@ -13,10 +13,11 @@ import execjs
 from typing import Optional
 from log_setup import get_logger
 from utils import execute_with_retry
+from notification import DingDingRobot
 # 设置日志记录器
 logger = get_logger("jygs", "logs", "daily_research.log")
 trading_calendar = TradingCalendar()
-
+dingding_robot = DingDingRobot()
 class JygsUtils:
     """韭研公社API工具类"""
     
@@ -134,7 +135,7 @@ class JygsUtils:
                     
                     stocks_data.append({
                         '股票简称': stock['name'],
-                        'code': stock['code'][2:],  # 去掉前缀
+                        'code': stock['code'][2:].zfill(6),  # 去掉前缀并确保6位字符串格式
                         'zt_time': action_info['time'],
                         '异动原因': expound_parts[0],
                         '解析': '\n'.join(expound_parts[1:]) if len(expound_parts) > 1 else '',
@@ -160,9 +161,9 @@ class JygsUtils:
             if os.path.exists(his_file_path):
                 existing_df = pd.read_csv(his_file_path, dtype={'日期': str})
                 
-                if trading_date in existing_df['日期'].values:
-                    logger.info(f"{trading_date}的解析数据已存在，跳过追加")
-                    return
+                # 从原文件中删除与新数据相同日期的记录，确保最新数据覆盖旧数据
+                existing_df = existing_df[existing_df['日期'] != trading_date]
+                logger.info(f"已从原文件中删除旧解析数据，准备添加最新数据")
                 
                 combined_df = pd.concat([df, existing_df], ignore_index=True)
             else:
@@ -171,7 +172,7 @@ class JygsUtils:
             # 按日期倒序排列并保存
             combined_df = combined_df.sort_values('日期', ascending=False)
             combined_df.to_csv(his_file_path, index=False, encoding='utf-8-sig')
-            logger.info(f"追加{trading_date}解析数据到: {his_file_path}，共{len(df)}条新记录")
+            logger.info(f"追加解析数据到: {his_file_path}，共{len(df)}条新记录")
             
         except Exception as e:
             logger.error(f"保存{trading_date}解析数据失败: {e}")
@@ -191,9 +192,9 @@ class JygsUtils:
             if os.path.exists(bk_his_file):
                 existing_bk_df = pd.read_csv(bk_his_file, dtype={'交易日期': str})
                 
-                if trading_date in existing_bk_df['交易日期'].values:
-                    logger.info(f"{trading_date}的板块数据已存在，跳过追加")
-                    return
+                # 从原文件中删除与新数据相同日期的记录，确保最新数据覆盖旧数据
+                existing_bk_df = existing_bk_df[existing_bk_df['交易日期'] != trading_date]
+                logger.info(f"已从原文件中删除日期 {trading_date} 的旧板块数据，准备添加最新数据")
                 
                 combined_bk_df = pd.concat([hotspot_stats, existing_bk_df], ignore_index=True)
             else:
@@ -202,7 +203,7 @@ class JygsUtils:
             # 按交易日期倒序排列并保存
             combined_bk_df = combined_bk_df.sort_values('交易日期', ascending=False)
             combined_bk_df.to_csv(bk_his_file, index=False, encoding='utf-8-sig')
-            logger.info(f"追加{trading_date}板块统计到: {bk_his_file}，共{len(hotspot_stats)}个热点")
+            logger.info(f"追加板块统计到: {bk_his_file}，共{len(hotspot_stats)}个热点")
             
         except Exception as e:
             logger.error(f"保存{trading_date}板块统计失败: {e}")
@@ -218,14 +219,12 @@ class JygsUtils:
                 # 读取现有数据
                 existing_df = pd.read_csv(latest_file, dtype={'日期': str})
                 
-                # 检查新数据中的日期是否已存在，避免重复添加
+                # 获取新数据中的日期
                 new_dates = set(new_data['日期'].unique())
-                existing_dates = set(existing_df['日期'].unique())
-                duplicate_dates = new_dates & existing_dates
                 
-                if duplicate_dates:
-                    logger.info(f"日期 {duplicate_dates} 的数据已存在，跳过重复添加")
-                    return
+                # 从原文件中删除与新数据相同日期的记录，确保最新数据覆盖旧数据
+                existing_df = existing_df[~existing_df['日期'].isin(new_dates)]
+                logger.info(f"已从原文件中删除日期 {new_dates} 的旧数据，准备添加最新数据")
                 
                 # 合并数据
                 combined_df = pd.concat([existing_df, new_data], ignore_index=True)
@@ -247,11 +246,11 @@ class JygsUtils:
             raise
 
     @staticmethod
-    def update_daily_data(trading_date: str, data_dir: str = None, session: requests.Session = None) -> None:
+    def update_daily_data(trading_date: str = None, data_dir: str = None, session: requests.Session = None) -> None:
         """保存每日异动数据的主入口函数"""
         try:
             session = session or execute_with_retry(JygsUtils._get_session)
-            df = execute_with_retry(JygsUtils._get_single_date_data, session, trading_date)
+            df = execute_with_retry(JygsUtils._get_single_date_data, session = session, trading_date = trading_date)
             
             if df.empty:
                 logger.error(f"{trading_date}无异动数据，跳过保存")
@@ -261,7 +260,7 @@ class JygsUtils:
             data_dir = data_dir or JygsUtils.DATA_DIR
             os.makedirs(data_dir, exist_ok=True)
             
-            logger.info(f"开始保存{trading_date}的异动数据，共{len(df)}条记录")
+            logger.info(f"开始保存异动数据，共{len(df)}条记录")
             
             # 1. 保存异动个股数据到历史文件
             JygsUtils._update_stocks_data(df, trading_date, data_dir)
@@ -272,27 +271,31 @@ class JygsUtils:
             # 3. 更新最新异动个股数据文件
             JygsUtils._update_latest_stocks_data(df, data_dir)
             
-            logger.info(f"完成{trading_date}异动数据保存")
+            logger.info(f"完成异动数据保存")
             
         except Exception as e:
-            logger.error(f"保存{trading_date}异动数据失败: {e}")
+            logger.error(f"保存异动数据失败: {e}")
             raise
         finally:
             if session:
                 session.close()
 
+    @staticmethod
+    def read_latest_data() -> pd.DataFrame:
+        """读取最新异动数据"""
+        return pd.read_csv(os.path.join(JygsUtils.DATA_DIR, "jygs.csv"), dtype={'code': str})
+
+def update_jygs_daily_data():
+    """更新韭研公社每日数据"""
+    logger.info("开始更新韭研公社每日数据")
+    try:
+        JygsUtils.update_daily_data()
+        dingding_robot.send_message(f"韭研公社每日数据保存完成", 'robot3')
+        return True
+    except Exception as e:
+        logger.error(f"更新韭研公社每日数据失败: {e}")
+        dingding_robot.send_message(f"韭研公社每日数据保存失败", 'robot3')
+        return False
 
 if __name__ == "__main__":
-    # 测试代码
-    try:
-        ds_list = trading_calendar.get_recent_trading_days(k=20)
-        for i,dt in enumerate(ds_list[8:]):
-            logger.info(f"开始保存{dt}异动数据，第{i+1}天")
-            try:
-                JygsUtils.update_daily_data(trading_date=dt, data_dir=JygsUtils.DATA_DIR)
-            except Exception as e:
-                logger.error(f"保存{dt}异动数据失败: {e}")
-                break
-            time.sleep(5 + randint(1, 5))
-    except Exception as e:
-        logger.error(f"测试失败: {e}")
+    update_jygs_daily_data()

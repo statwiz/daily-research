@@ -8,16 +8,20 @@ import pandas as pd
 import numpy as np
 import re
 import time
+from datetime import datetime
 import os
 from typing import Optional
 import logging
 from log_setup import get_logger
 from utils import execute_with_retry
-
+from notification import DingDingRobot
+from trading_calendar import TradingCalendar
 # 配置常量
 DEFAULT_DATA_DIR = "/Users/thua/Desktop/QFin/daily-research/data/csv"
 
+dingding_robot = DingDingRobot()
 logger = get_logger("wencai", "logs", "daily_research.log")
+trading_calendar = TradingCalendar()
 
 class WencaiUtils:
     """问财API工具类"""
@@ -278,7 +282,7 @@ class WencaiUtils:
             # 计算衍生指标
             # 竞价换手率 = 竞价量 / 自由流通股 * 100
             df['竞换手Z'] = df.apply(
-                lambda x: round(x['竞价量'] / x['自由流通股'] * 100, 2) 
+                lambda x: round(x['竞价量'] / x['自由流通股'] * 100, 3) 
                 if x['自由流通股'] > 0 else -1000, 
                 axis=1
             )
@@ -568,11 +572,6 @@ class WencaiUtils:
             # 保存当日涨停数据到独立文件
             daily_file_path = os.path.join(ths_dir, f"ths_zt_{trading_date}.csv")
             
-            # 检查文件是否已存在
-            if os.path.exists(daily_file_path):
-                logger.info(f"{trading_date}涨停数据文件已存在，跳过保存: {daily_file_path}")
-                return
-            
             df.to_csv(daily_file_path, index=False, encoding='utf-8-sig')
             logger.info(f"保存{trading_date}涨停数据到: {daily_file_path}，共{len(df)}条记录")
             
@@ -594,14 +593,12 @@ class WencaiUtils:
                 # 读取现有数据
                 existing_df = pd.read_csv(latest_file, dtype={'交易日期': str})
                 
-                # 检查新数据中的日期是否已存在，避免重复添加
+                # 获取新数据中的日期
                 new_dates = set(new_data['交易日期'].unique())
-                existing_dates = set(existing_df['交易日期'].unique())
-                duplicate_dates = new_dates & existing_dates
                 
-                if duplicate_dates:
-                    logger.info(f"日期 {duplicate_dates} 的数据已存在，跳过重复添加")
-                    return
+                # 从原文件中删除与新数据相同日期的记录，确保最新数据覆盖旧数据
+                existing_df = existing_df[~existing_df['交易日期'].isin(new_dates)]
+                logger.info(f"已从原文件中删除日期 {new_dates} 的旧数据，准备添加最新数据")
                 
                 # 合并数据
                 combined_df = pd.concat([existing_df, new_data], ignore_index=True)
@@ -653,11 +650,98 @@ class WencaiUtils:
         except Exception as e:
             logger.error(f"保存每日同花顺涨停数据失败: {e}")
             raise
+    # 每日更新行情数据到文件
+    @staticmethod
+    def update_daily_market_overview_data(data_dir: str = None) -> None:
+        """保存每日行情数据的主入口函数"""
+        try:
+            # 获取行情数据（非北交所）
+            df = execute_with_retry(WencaiUtils.get_market_overview_data,loop=True)
+            if df.empty:
+                logger.error("无行情数据（非北交所），跳过保存")
+                raise Exception("无行情数据（非北交所），跳过保存")
+            df_bj = execute_with_retry(WencaiUtils.get_market_overview_data, loop=True,is_bj_exchange=True)
+            if df_bj.empty:
+                logger.error("无行情数据（北交所），跳过保存")
+                raise Exception("无行情数据（北交所），跳过保存")
+            df = pd.concat([df, df_bj])
+            # 从数据中提取交易日期
+            trading_date = df['交易日期'].iloc[0]
+            logger.info(f"从数据中提取到交易日期: {trading_date}")
+            
+            # 设置默认数据目录
+            if data_dir is None:
+                data_dir = DEFAULT_DATA_DIR
+            
+            logger.info(f"开始保存{trading_date}的行情数据，共{len(df)}条记录")
+            
+            WencaiUtils._update_market_overview_data(df, trading_date, data_dir)
+            
+            logger.info(f"完成{trading_date}行情数据保存")
+            
+        except Exception as e:
+            logger.error(f"保存每日行情数据失败: {e}")
+            raise
     
+    @staticmethod
+    def _update_market_overview_data(df: pd.DataFrame, trading_date: str, data_dir: str) -> None:
+        """保存行情数据到当日文件"""
+        try:
+            # 确保ths目录存在
+            ths_dir = os.path.join(data_dir, "ths")
+            os.makedirs(ths_dir, exist_ok=True)
+            
+            # 保存当日行情数据到独立文件
+            daily_file_path = os.path.join(ths_dir, f"ths_market_overview_{trading_date}.csv")
+            
+            df.to_csv(daily_file_path, index=False, encoding='utf-8-sig')
+            logger.info(f"保存{trading_date}行情数据到: {daily_file_path}，共{len(df)}条记录")
+            
+        except Exception as e:
+            logger.error(f"保存{trading_date}行情数据失败: {e}")
+            raise    
+    # 读取行情数据
+    @staticmethod
+    def read_market_overview_data(date_str: str = None) -> pd.DataFrame:
+        """读取行情数据"""
+        if date_str is None:
+            date_str = trading_calendar.get_default_trade_date()
+        return pd.read_csv(os.path.join(DEFAULT_DATA_DIR, "ths", f"ths_market_overview_{date_str}.csv"), dtype={'code': str, 'market_code': str})
+    # 读取涨停数据
+    @staticmethod
+    def read_zt_stocks(date_str: str = None) -> pd.DataFrame:
+        """读取涨停数据"""
+        if date_str is None:
+            date_str = trading_calendar.get_default_trade_date()
+        return pd.read_csv(os.path.join(DEFAULT_DATA_DIR, "ths", f"ths_zt_{date_str}.csv"), dtype={'code': str, 'market_code': str})
+    # 读取最新涨停数据
+    @staticmethod
+    def read_latest_zt_stocks() -> pd.DataFrame:
+        """读取最新涨停数据"""
+        return pd.read_csv(os.path.join(DEFAULT_DATA_DIR, "ths", "ths_zt.csv"), dtype={'code': str, 'market_code': str})
+    # 读取跌停数据
+def update_ths_daily_data():
+    """更新同花顺每日数据（行情+涨停），两个任务独立执行"""
+    logger.info("开始更新同花顺每日数据")
     
+    # 更新行情数据
+    try:
+        WencaiUtils.update_daily_market_overview_data()
+        dingding_robot.send_message("同花顺行情数据保存完成", 'robot3')
+    except Exception as e:
+        logger.error(f"保存每日行情数据失败: {e}")
+    
+    # 更新涨停数据  
+    try:
+        WencaiUtils.update_daily_zt_data()
+        dingding_robot.send_message("同花顺涨停数据保存完成", 'robot3')
+    except Exception as e:
+        logger.error(f"保存每日涨停数据失败: {e}")
+    
+    logger.info("同花顺每日数据更新完成")
+
 
 
 
 if __name__ == "__main__":
-    # 测试：保存涨停数据（交易日期从数据中自动提取）
-    WencaiUtils.update_daily_zt_data()
+    update_ths_daily_data()
