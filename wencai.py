@@ -169,28 +169,34 @@ class WencaiUtils:
             raise
 
     @staticmethod
-    def get_first_breakout_stocks() -> pd.DataFrame:
+    def get_first_breakout_stocks(use_filters: str = None) -> pd.DataFrame:
         """
         获取首次突破股票数据
         """
         logger.info(f"开始获取首次突破股票数据")
-        query_text = f"最新涨跌幅大于9.5%,前10个交易日至昨日的涨幅超过9.5%的次数等于0"
+        if use_filters == True:
+            query_text = f"自由流通市值大于100亿,最新涨跌幅大于7%,前10个交易日至昨日的涨幅超过9.5%的次数等于0"
+        else:
+            query_text = f"自由流通市值大于0,最新涨跌幅大于9.5%,前10个交易日至昨日的涨幅超过9.5%的次数等于0"
+        
         logger.info(f"查询语句: {query_text}")
         try:
             df = pywencai.get(query=query_text, query_type='stock', loop = True)
             logger.info(f"原始数据获取成功, 数据量: {len(df)}")
             df['交易日期'] = WencaiUtils.extract_trade_date(df)
             df = WencaiUtils.remove_date_suffix(df)
-            df.rename(columns={'涨跌幅:前复权': '涨跌幅'}, inplace=True)
+            df.rename(columns={'涨跌幅:前复权': '涨跌幅', '自由流通市值': '市值Z'}, inplace=True)
             for col in ['涨跌幅']:
                 if col in df.columns:
                     df[col] = df[col].astype(float).round(2)
             for col in ['market_code', 'code']:
                 if col in df.columns:
                     df[col] = df[col].astype(str)
-            format_name = ['交易日期','股票简称','涨跌幅','market_code','code']
-            df = df[format_name]
-            return df
+            for col in ['市值Z']:
+                if col in df.columns:
+                    df[col] = df[col].astype(float).astype(int)
+            output_columns = ['交易日期','股票简称','涨跌幅','市值Z','market_code','code']
+            return df[output_columns]
         except Exception as e:
             logger.error(f"获取首次突破股票数据失败: {e}")
             raise
@@ -719,7 +725,10 @@ class WencaiUtils:
     def read_latest_zt_stocks() -> pd.DataFrame:
         """读取最新涨停数据"""
         return pd.read_csv(os.path.join(DEFAULT_DATA_DIR, "ths", "ths_zt.csv"), dtype={'code': str, 'market_code': str})
-    # 读取跌停数据
+    
+
+
+
 def update_ths_daily_data():
     """更新同花顺每日数据（行情+涨停），两个任务独立执行"""
     logger.info("开始更新同花顺每日数据")

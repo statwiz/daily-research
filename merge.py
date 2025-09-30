@@ -41,12 +41,14 @@ for col in col_list:
     df_merge[col] = df_merge[col].replace([np.inf, -np.inf], np.nan)
     df_merge.fillna(0, inplace=True)
 
-df_merge['市值Z'] = df_merge['市值Z'].apply(lambda x: str(round(x/1e8))+'亿')
-df_merge['成交额'] = df_merge['成交额'].apply(lambda x: str(round(x/1e8,1))+'亿')
-df_merge['竞价金额'] = df_merge['竞价金额'].apply(lambda x: str(round(x/1e4))+'万') 
-df_merge['大单净额'] = df_merge['大单净额'].apply(lambda x: str(round(x/1e4))+'万')
-df_merge['涨停封单额'] = df_merge['涨停封单额'].apply(lambda x: str(round(x/1e4))+'万')
+df_merge['市值Z'] = df_merge['市值Z'].apply(lambda x: round(x/1e8))
+df_merge['成交额'] = df_merge['成交额'].apply(lambda x: round(x/1e8,1))
+df_merge['大单净额'] = df_merge['大单净额'].apply(lambda x: round(x/1e8,2))
+df_merge['涨停封单额'] = df_merge['涨停封单额'].apply(lambda x: round(x/1e8,2))
+df_merge['竞价金额'] = df_merge['竞价金额'].apply(lambda x: round(x/1e8,2))
+
 print(df_merge.head(1))
+print(df_merge.columns)
 
 #保存合并数据，文件名merge_交易日.csv
 trading_date = df_merge['交易日期'].iloc[0]

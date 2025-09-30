@@ -59,42 +59,88 @@ class StockPool:
         self.dingding_robot = dingding_robot
         self.logger = logger
 
-    def get_csv_save_path(self, date_str: str = None) -> str:
-        """生成CSV文件保存路径"""
-        if date_str is None:
-            date_str = trading_calendar.get_default_trade_date()
-        return f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/{StockPoolConfig.DATA_FILE_PREFIX}_{date_str}.csv"
-    
-    def get_txt_save_path(self, date_str: str = None) -> str:
-        """生成TXT文件保存路径"""
-        if date_str is None:
-            date_str = trading_calendar.get_default_trade_date()
-        return f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}/stock_pool/{StockPoolConfig.DATA_FILE_PREFIX}_{date_str}.txt"
-    
-    def get_data_save_path(self, date_str: str = None) -> str:
-        """获取主要数据保存路径"""
-        return self.get_csv_save_path(date_str)
-    
-    def get_zj_csv_save_path(self, date_str: str = None) -> str:
-        """生成资金版CSV文件保存路径（大于200亿流通市值）"""
-        if date_str is None:
-            date_str = trading_calendar.get_default_trade_date()
-        return f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/{StockPoolConfig.DATA_FILE_PREFIX}_zj_{date_str}.csv"
-    
-    def get_zj_txt_save_path(self, date_str: str = None) -> str:
-        """生成资金版TXT文件保存路径（大于200亿流通市值）"""
-        if date_str is None:
-            date_str = trading_calendar.get_default_trade_date()
-        return f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}/stock_pool/{StockPoolConfig.DATA_FILE_PREFIX}_zj_{date_str}.txt"
 
     def read_stock_pool_data(self, date_str: str = None) -> pd.DataFrame:
         """读取股票池数据"""
         if date_str is None:
             date_str = trading_calendar.get_default_trade_date()
-        return pd.read_csv(self.get_csv_save_path(date_str), dtype={'code': str, 'market_code': str})
+        csv_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/core_stocks_{date_str}.csv"
+        return pd.read_csv(csv_path, dtype={'code': str, 'market_code': str})
+        
+    def save_stock_pool_data(self, df: pd.DataFrame, date_str: str = None,prefix: str = 'core_stocks',
+                            market_value_threshold: float = 100) -> dict:
+        """
+        保存股票池数据到CSV和TXT文件
+        
+        Args:
+            df: 要保存的DataFrame
+            date_str: 日期字符串，如果为None则使用当前日期
+            market_value_threshold: 市值筛选阈值（亿元）
+        
+        Returns:
+            dict: 保存的文件路径信息
+        """
+        if date_str is None:
+            date_str = trading_calendar.get_default_trade_date()
+        
+        self.logger.info(f"开始保存股票池数据, 数据量: {len(df)}")
+        saved_paths = {}
+        
+        # 创建所需的目录结构
+        os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool", exist_ok=True)
+        os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}/stock_pool", exist_ok=True)
+        
+        if df.empty:
+            self.logger.warning("没有找到数据，跳过保存")
+            return saved_paths
+        
+        # 检查必要的列
+        if 'code' not in df.columns:
+            raise ValueError("DataFrame中缺少'code'列")
+        
+        # 保存全量数据到CSV
+        csv_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/{prefix}_{date_str}.csv"
+        df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+        saved_paths['main_csv'] = csv_path
+        self.logger.info(f"股票池全量CSV保存完成, 路径: {csv_path}")
+        
+        # 保存全量代码到TXT
+        stock_codes = df['code'].astype(str).str.zfill(6).tolist()
+        txt_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}/stock_pool/{prefix}_{date_str}.txt"
+        with open(txt_path, 'w', encoding='utf-8') as f:
+            for code in stock_codes:
+                f.write(f"{code}\n")
+        saved_paths['main_txt'] = txt_path
+        self.logger.info(f"股票池全量版代码保存完成, 路径: {txt_path}")
+        
+        # 如果有市值列，保存中军版
+        if '市值Z' in df.columns:
+            threshold_value = market_value_threshold * 1e8
+            filtered_df = df[df['市值Z'] > threshold_value]
+            self.logger.info(f"筛选出大于{market_value_threshold}亿自由流通市值的股票数量: {len(filtered_df)}")
+            
+            if len(filtered_df) > 0:
+                # 保存中军版CSV
+                filtered_csv_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/{prefix}_zj_{date_str}.csv"
+                filtered_df.to_csv(filtered_csv_path, index=False, encoding='utf-8-sig')
+                saved_paths['filtered_csv'] = filtered_csv_path
+                self.logger.info(f"股票池中军版CSV保存完成, 路径: {filtered_csv_path}")
+                
+                # 保存中军版代码到TXT
+                filtered_stock_codes = filtered_df['code'].astype(str).str.zfill(6).tolist()
+                filtered_txt_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}/stock_pool/{prefix}_zj_{date_str}.txt"
+                with open(filtered_txt_path, 'w', encoding='utf-8') as f:
+                    for code in filtered_stock_codes:
+                        f.write(f"{code}\n")
+                saved_paths['filtered_txt'] = filtered_txt_path
+                self.logger.info(f"股票池中军版代码保存完成, 路径: {filtered_txt_path}")
+            else:
+                self.logger.warning(f"没有找到大于{market_value_threshold}亿自由流通市值的股票，跳过中军版数据保存")
+        
+        return saved_paths
 
     def compare_with_previous_trading_day(self, current_df: pd.DataFrame, date_str: str = None) -> str:
-        """与前一个交易日的数据进行对比，返回对比消息"""
+        """与前一个交易日的数据进行对比，返回对比消息，并保存新增和减少的股票数据"""
         if date_str is None:
             date_str = trading_calendar.get_default_trade_date()
         
@@ -105,7 +151,7 @@ class StockPool:
         
         # 查找前一交易日的CSV文件
         previous_date_str = previous_date.strftime('%Y%m%d')
-        previous_file = self.get_csv_save_path(previous_date_str)
+        previous_file = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/core_stocks_{previous_date_str}.csv"
         
         if not os.path.exists(previous_file):
             return f"📊 今日股票池更新完成\n数据量: {len(current_df)}只股票\n⚠️ 未找到前一交易日数据文件"
@@ -124,6 +170,26 @@ class StockPool:
         # 获取新增和移除的股票代码
         new_codes = current_codes - previous_codes
         removed_codes = previous_codes - current_codes
+        
+        # 保存新增和减少的股票数据到CSV文件
+        save_dir = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool"
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # 保存新增股票数据
+        if len(new_codes) > 0:
+            new_stocks_df = current_df[current_df['code'].astype(str).isin(new_codes)].copy()
+            new_stocks_df = new_stocks_df.sort_values('重要度', ascending=False)
+            add_file_path = f"{save_dir}/add_{date_str}.csv"
+            new_stocks_df.to_csv(add_file_path, index=False, encoding='utf-8-sig')
+            self.logger.info(f"新增股票数据保存完成, 路径: {add_file_path}, 数量: {len(new_stocks_df)}")
+        
+        # 保存减少股票数据
+        if len(removed_codes) > 0:
+            removed_stocks_df = previous_df[previous_df['code'].astype(str).isin(removed_codes)].copy()
+            removed_stocks_df = removed_stocks_df.sort_values('重要度', ascending=False)
+            remove_file_path = f"{save_dir}/remove_{date_str}.csv"
+            removed_stocks_df.to_csv(remove_file_path, index=False, encoding='utf-8-sig')
+            self.logger.info(f"减少股票数据保存完成, 路径: {remove_file_path}, 数量: {len(removed_stocks_df)}")
         
         # 构建基础消息
         date_fmt = f"{previous_date.strftime('%Y-%m-%d')}"
@@ -227,7 +293,7 @@ class StockPool:
         
         return grouped_df[["交易日期", "股票简称", "市值Z", "market_code", "code", "区间信息", "重要度"]]
 
-    def get_stock_pool(self, selected=None):
+    def get_muti_top_stocks(self, selected=None):
         """
         获取股票池数据，通过多个时间区间组合计算重要度
         
@@ -260,190 +326,82 @@ class StockPool:
             self.logger.error(f"获取股票池失败: {e}")
             return None
 
-    def save_stock_pool_codes(self, df: pd.DataFrame, date_str: str = None) -> str:
-        """
-        将股票池的代码保存为txt文件
-        
-        Args:
-            df: 包含股票数据的DataFrame
-            date_str: 日期字符串，如果为None则使用当前日期
-        
-        Returns:
-            保存的txt文件路径
-        """
-        if date_str is None:
-            date_str = trading_calendar.get_default_trade_date()
-        
-        self.logger.info(f"开始保存股票池代码到txt文件, 股票数量: {len(df)}")
-        start_time = time.time()
-        
-        # 检查必要的列
-        if df.empty or 'code' not in df.columns:
-            raise ValueError("DataFrame中缺少'code'列")
-        
-        # 获取股票代码列表，并确保格式正确（6位数字）
-        stock_codes = df['code'].astype(str).str.zfill(6).tolist()
-        
-        # 确保保存目录存在
-        txt_path = self.get_txt_save_path(date_str)
-        txt_dir = os.path.dirname(txt_path)
-        os.makedirs(txt_dir, exist_ok=True)
-        
-        # 保存代码到txt文件，每行一个代码
-        with open(txt_path, 'w', encoding='utf-8') as f:
-            for code in stock_codes:
-                f.write(f"{code}\n")
-        
-        processing_time = time.time() - start_time
-        self.logger.info(f"股票池代码保存完成, 耗时: {processing_time:.2f}秒, 保存路径: {txt_path}")
-        
-        return txt_path
 
-    def save_zj_stock_pool_codes(self, df: pd.DataFrame, date_str: str = None) -> str:
+    def get_core_stocks_data(self) -> pd.DataFrame:
         """
-        将资金版股票池的代码保存为txt文件（大于200亿流通市值）
-        
-        Args:
-            df: 包含股票数据的DataFrame
-            date_str: 日期字符串，如果为None则使用当前日期
-        
-        Returns:
-            保存的txt文件路径
-        """
-        if date_str is None:
-            date_str = trading_calendar.get_default_trade_date()
-        
-        self.logger.info(f"开始保存中军版股票池代码到txt文件, 股票数量: {len(df)}")
-        start_time = time.time()
-        
-        # 检查必要的列
-        if df.empty or 'code' not in df.columns:
-            raise ValueError("DataFrame中缺少'code'列")
-        
-        # 获取股票代码列表，并确保格式正确（6位数字）
-        stock_codes = df['code'].astype(str).str.zfill(6).tolist()
-        
-        # 确保保存目录存在
-        txt_path = self.get_zj_txt_save_path(date_str)
-        txt_dir = os.path.dirname(txt_path)
-        os.makedirs(txt_dir, exist_ok=True)
-        
-        # 保存代码到txt文件，每行一个代码
-        with open(txt_path, 'w', encoding='utf-8') as f:
-            for code in stock_codes:
-                f.write(f"{code}\n")
-        
-        processing_time = time.time() - start_time
-        self.logger.info(f"中军版股票池代码保存完成, 耗时: {processing_time:.2f}秒, 保存路径: {txt_path}")
-        
-        return txt_path
-
-    def collect_stock_pool_data(self) -> list:
-        """
-        收集所有股票池数据
+        获取所有核心股票池数据
         
         Returns:
             包含所有股票池DataFrame的列表
         """
-        data_list = []
-        
-        # 股票池配置：(筛选条件, 描述)
-        pool_configs = [
-            (None, "全量股票池数据"),
-            ('30', "筛选后股票池数据: 自由流通市值>30亿"),  
-            ('60', "筛选后股票池数据: 自由流通市值>60亿"),
-            ('100', "筛选后股票池数据: 自由流通市值>100亿"),
-            ('200', "筛选后股票池数据: 自由流通市值>200亿"),
-        ]
-        
-        for i, (selected, description) in enumerate(pool_configs, 1):
-            step_name = "步骤1" if selected is None else f"步骤2.{i-1}"
-            self.logger.info(f" ------------ {step_name}: 获取{description} ------------")
+        try:
+            data_list = []
             
-            data = self.get_stock_pool(selected=selected)
-            if data is None or data.empty:
-                self.logger.warning(f"{description}获取失败，跳过本次尝试")
-                return None  # 任何一个获取失败就返回None
+            # 股票池配置：(筛选条件, 描述)
+            pool_configs = [
+                (None, "全量股票池数据"),
+                ('30', "筛选后股票池数据: 自由流通市值>30亿"),  
+                ('60', "筛选后股票池数据: 自由流通市值>60亿"),
+                ('100', "筛选后股票池数据: 自由流通市值>100亿"),
+                ('200', "筛选后股票池数据: 自由流通市值>200亿"),
+            ]
             
-            self.logger.info(f'{description}获取成功, 数据量: {data.shape}')
-            data_list.append(data)
-        
-        return data_list
+            for i, (selected, description) in enumerate(pool_configs, 1):
+                step_name = "步骤1" if selected is None else f"步骤2.{i-1}"
+                self.logger.info(f" ------------ {step_name}: 获取{description} ------------")
+                
+                data = self.get_muti_top_stocks(selected=selected)
+                if data is None or data.empty:
+                    self.logger.warning(f"{description}获取失败，跳过本次尝试")
+                    return None  # 任何一个获取失败就返回None
+                
+                self.logger.info(f'{description}获取成功, 数据量: {data.shape}')
+                data_list.append(data)
+            if len(data_list) == 0:
+                return None
+            combined_df = pd.concat(data_list, ignore_index=True)
+            
+            # 按股票分组，保留重要度最高的记录
+            groupby_keys = ['交易日期', '股票简称', '市值Z', 'market_code', 'code']
+            max_importance_idx = combined_df.groupby(groupby_keys)['重要度'].idxmax()
+            df = (combined_df.loc[max_importance_idx]
+                    .sort_values(by='重要度', ascending=False)
+                    .reset_index(drop=True))
+            df['重要度'] = df['重要度'].round(2)
+            return df
+        except Exception as e:
+            self.logger.error(f"获取核心股票池数据失败: {e}")
+            return None
 
-    def process_and_merge_data(self, data_list: list) -> pd.DataFrame:
+    def get_first_breakout_stocks(self):
         """
-        合并并去重股票池数据
-        
-        Args:
-            data_list: 包含多个股票池DataFrame的列表
-        
-        Returns:
-            去重后按重要度排序的DataFrame
-        """    
-        # 合并所有数据
-        combined_df = pd.concat(data_list, ignore_index=True)
-        
-        # 按股票分组，保留重要度最高的记录
-        groupby_keys = ['交易日期', '股票简称', '市值Z', 'market_code', 'code']
-        max_importance_idx = combined_df.groupby(groupby_keys)['重要度'].idxmax()
-        final_df = (combined_df.loc[max_importance_idx]
-                   .sort_values(by='重要度', ascending=False)
-                   .reset_index(drop=True))
-        final_df['重要度'] = final_df['重要度'].round(2)
-        
-        return final_df
-
-    def save_stock_pool_data(self, final_df: pd.DataFrame, trade_date: str):
+        获取首板股票池数据
         """
-        保存股票池数据到CSV和TXT文件
-        
-        Args:
-            final_df: 最终的股票池数据
-            trade_date: 交易日期
-        """    
-        # 创建所需的目录结构
-        os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool", exist_ok=True)
-        os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}/stock_pool", exist_ok=True)
-        
-        # 保存主要股票池数据
-        if len(final_df) > 0:
-            save_path = self.get_csv_save_path(trade_date)
-            final_df.to_csv(save_path, index=False, encoding='utf-8-sig')
-            self.logger.info(f"主股票池CSV保存完成, 路径: {save_path}")
-        else:
-            self.logger.warning("没有找到股票，跳过数据保存")
-            return
-        
-        # 筛选大于200亿自由流通市值的股票（资金版）
-        final_zj_df = final_df[final_df['市值Z'] > 100 * 1e8]
-        self.logger.info(f"筛选出大于100亿自由流通市值的股票数量: {len(final_zj_df)}")
-        
-        # 保存资金版数据
-        if len(final_zj_df) > 0:
-            zj_csv_path = self.get_zj_csv_save_path(trade_date)
-            final_zj_df.to_csv(zj_csv_path, index=False, encoding='utf-8-sig')
-            self.logger.info(f"中军版股票池CSV保存完成, 路径: {zj_csv_path}")
-            
-            # 保存资金版股票代码到txt文件
-            self.save_zj_stock_pool_codes(final_zj_df, trade_date)
-        else:
-            self.logger.warning("没有找到大于100亿自由流通市值的股票，跳过资金版数据保存")
-        
-        # 保存股票池代码到txt文件
-        self.logger.info("保存股票池代码到txt文件")
-        self.save_stock_pool_codes(final_df, trade_date)
+        try:
+            self.logger.info("开始获取所有的首板股票池数据")
+            df = execute_with_retry(WencaiUtils.get_first_breakout_stocks, 
+                                   use_filters=False)
+            if df is None or df.empty:
+                raise Exception("获取所有首板股票池数据失败")
+            self.logger.info(f"所有首板股票池数据量: {len(df)}")
+            # 保存所有首板股票池数据
+            # self.save_stock_pool_codes(df, trade_date)
+            self.logger.info("开始获取自由流通市值大于100亿的首板股票池数据")
+            df_zj = execute_with_retry(WencaiUtils.get_first_breakout_stocks, 
+                                   use_filters=True)
+            if df_zj is None or df_zj.empty:
+                raise Exception("获取自由流通市值大于100亿的首板股票池数据失败")
+            self.logger.info(f"自由流通市值大于100亿的首板股票池数据量: {len(df_zj)}")
+            df = pd.concat([df, df_zj])
+            # 去重
+            df = df.drop_duplicates(subset=['股票简称'])
+            return df
+        except Exception as e:
+            self.logger.error(f"获取首板股票池数据失败: {e}")
+            return None
 
     def run(self):
-        """
-        主方法：获取股票池数据并保存
-        
-        执行流程：
-        1. 检查是否为交易日
-        2. 收集所有股票池数据（全量+各筛选条件）
-        3. 合并数据并去重（同一股票保留重要度最高的记录）
-        4. 数据对比分析
-        5. 保存结果并发送通知
-        """
+
         self.logger.info("开始执行股票池数据获取任务...")
         
         # 检查是否为交易日
@@ -454,31 +412,36 @@ class StockPool:
         
         for i in range(StockPoolConfig.MAX_RETRY_COUNT):
             try:
-                # 步骤1-2: 收集所有股票池数据
-                data_list = self.collect_stock_pool_data()
-                if data_list is None:
-                    self.logger.warning("股票池数据收集失败，跳过本次尝试")
+                if i > 0:
+                    self.logger.info(f"------------ 第{i}次重试 ------------")
+                # 步骤1: 获取核心股票池数据
+                core_df = self.get_core_stocks_data()
+                if core_df is None or core_df.empty:
+                    self.logger.warning("核心股票池数据收集失败，跳过本次尝试")
+                    continue            
+                # 获取交易日期
+                trade_date = core_df['交易日期'].iloc[0]
+                # 步骤2: 保存首板股票池数据
+                self.logger.info("------------ 步骤2: 保存首板股票池数据------------")
+                first_stocks_df = self.get_first_breakout_stocks()
+                if first_stocks_df is None or first_stocks_df.empty:
+                    self.logger.warning("首板股票池数据收集失败，跳过本次尝试")
                     continue
+                self.save_stock_pool_data(first_stocks_df, trade_date, prefix='first_stocks')
                 
-                # 步骤3: 合并并去重处理
-                self.logger.info(" ------------ 步骤3: 合并数据并去重 ------------")
-                final_df = self.process_and_merge_data(data_list)
+                # 步骤3: 保存核心股票池数据
+                self.logger.info("------------ 步骤2: 保存核心股票池数据------------")
+                self.save_stock_pool_data(core_df, trade_date, prefix='core_stocks')
                 
                 # 步骤4: 数据对比分析
-                self.logger.info("------------ 步骤4: 与前一交易日数据进行对比分析------------")
-                trade_date = final_df['交易日期'].iloc[0]
-                comparison_msg = self.compare_with_previous_trading_day(final_df, trade_date)
+                self.logger.info("------------ 步骤3: 与前一交易日数据进行对比分析------------")
+                comparison_msg = self.compare_with_previous_trading_day(core_df, trade_date)
                 
-                # 步骤5-6: 保存数据
-                self.logger.info("------------ 步骤5: 保存数据------------")
-                self.save_stock_pool_data(final_df, trade_date)
-                
-                # 步骤6: 发送对比结果通知
-                self.logger.info("------------ 步骤6: 发送数据对比结果到钉钉------------")
-                self.logger.info(f"任务完成! 最终数据量: {final_df.shape}")
+                # 步骤4: 发送数据对比结果到钉钉
+                self.logger.info("------------ 步骤4: 发送数据对比结果到钉钉------------")
+                self.logger.info(f"任务完成! 最终数据量: {core_df.shape}")
                 self.dingding_robot.send_message(comparison_msg, 'robot3')
-                return  # 成功完成，退出函数
-                
+                break                        
             except Exception as e:
                 if i == StockPoolConfig.MAX_RETRY_COUNT - 1:
                     # 最后一次尝试失败
