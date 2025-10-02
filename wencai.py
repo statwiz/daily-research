@@ -169,18 +169,27 @@ class WencaiUtils:
             raise
 
     @staticmethod
-    def get_first_breakout_stocks(use_filters: str = None) -> pd.DataFrame:
+    def get_first_breakout_stocks(k = 11, use_filters: str = None) -> pd.DataFrame:
         """
         获取首次突破股票数据
         """
-        logger.info(f"开始获取首次突破股票数据")
-        if use_filters == True:
-            query_text = f"自由流通市值大于100亿,最新涨跌幅大于7%,前10个交易日至昨日的涨幅超过9.5%的次数等于0"
-        else:
-            query_text = f"自由流通市值大于0,最新涨跌幅大于9.5%,前10个交易日至昨日的涨幅超过9.5%的次数等于0"
-        
-        logger.info(f"查询语句: {query_text}")
         try:
+            logger.info(f"开始获取首次突破股票数据")
+            trade_dates = trading_calendar.get_recent_trading_days(k=k) # 正序
+            if len(trade_dates) != k:
+                raise Exception("获取交易日期失败")
+
+            current_date = trade_dates[-1]
+            start_date = trade_dates[0]
+            end_date = trade_dates[-2]
+            # print(f"current_date: {current_date}, start_date: {start_date}, end_date: {end_date}")
+            if use_filters == True:
+                query_text = f"自由流通市值大于100亿,最新涨跌幅大于7%,{start_date}至{end_date}的涨幅超过9.5%的次数等于0"
+            else:
+                query_text = f"自由流通市值大于0,最新涨跌幅大于9.5%,{start_date}至{end_date}的涨幅超过9.5%的次数等于0"
+            
+            logger.info(f"查询语句: {query_text}")
+        
             df = pywencai.get(query=query_text, query_type='stock', loop = True)
             logger.info(f"原始数据获取成功, 数据量: {len(df)}")
             df['交易日期'] = WencaiUtils.extract_trade_date(df)
@@ -753,4 +762,5 @@ def update_ths_daily_data():
 
 
 if __name__ == "__main__":
-    update_ths_daily_data()
+    # update_ths_daily_data()
+    print(WencaiUtils.get_first_breakout_stocks())

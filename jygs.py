@@ -156,6 +156,9 @@ class JygsUtils:
     def _update_stocks_data(df: pd.DataFrame, trading_date: str, data_dir: str) -> None:
         """保存解析数据到历史文件"""
         try:
+            if trading_date is None:
+                trading_date = df['日期'].iloc[0]   
+
             his_file_path = os.path.join(data_dir, "jygs_his.csv")
             
             if os.path.exists(his_file_path):
@@ -182,10 +185,14 @@ class JygsUtils:
     def _update_bk_data(df: pd.DataFrame, trading_date: str, data_dir: str) -> None:
         """保存热点板块统计信息"""
         try:
+            if trading_date is None:
+                trading_date = df['日期'].iloc[0]
+
             # 生成板块统计数据
             hotspot_stats = df.groupby(['热点', '日期']).size().reset_index(name='股票数量')
             hotspot_stats['交易日期'] = trading_date
             hotspot_stats = hotspot_stats[['交易日期', '热点', '股票数量']]
+            print(hotspot_stats.head())
             
             bk_his_file = os.path.join(data_dir, "jygs_bk_his.csv")
             
@@ -281,15 +288,19 @@ class JygsUtils:
                 session.close()
 
     @staticmethod
-    def read_latest_data() -> pd.DataFrame:
+    def read_stocks_data(prefix: str = 'jygs') -> pd.DataFrame:
         """读取最新异动数据"""
-        return pd.read_csv(os.path.join(JygsUtils.DATA_DIR, "jygs.csv"), dtype={'code': str})
+        return pd.read_csv(os.path.join(JygsUtils.DATA_DIR, f"{prefix}.csv"), dtype={'code': str})
+    @staticmethod
+    def read_bk_data(prefix: str = 'jygs_bk_his') -> pd.DataFrame:
+        """读取热点板块统计信息"""
+        return pd.read_csv(os.path.join(JygsUtils.DATA_DIR, f"{prefix}.csv"), dtype={'交易日期': str})
 
-def update_jygs_daily_data():
+def update_jygs_daily_data(trading_date: str = None):
     """更新韭研公社每日数据"""
     logger.info("开始更新韭研公社每日数据")
     try:
-        JygsUtils.update_daily_data()
+        JygsUtils.update_daily_data(trading_date=trading_date)
         dingding_robot.send_message(f"韭研公社每日数据保存完成", 'robot3')
         return True
     except Exception as e:
@@ -299,3 +310,4 @@ def update_jygs_daily_data():
 
 if __name__ == "__main__":
     update_jygs_daily_data()
+    
