@@ -320,7 +320,7 @@ def merge_data(stock_pool_data: pd.DataFrame,
         
         # 选择需要的市场概览列，检查列是否存在
         market_columns = ['code', 'market_code', '热度排名', '竞换手Z', '竞价金额', 
-                         '竞价涨幅', '涨跌幅', '实体涨幅', '换手Z', '成交额', '大单净额', '上市板块']
+                         '竞价涨幅', '涨跌幅', '实体涨幅', '换手Z', '成交额', '大单净额', '上市板块','几天几板']
         available_market_columns = [col for col in market_columns if col in market_data.market_overview.columns]
         
         # 选择需要的涨停数据列
@@ -350,7 +350,6 @@ def merge_data(stock_pool_data: pd.DataFrame,
                                   market_data.zt_stocks[available_zt_columns], 
                                   on=['code', 'market_code'], 
                                   how='left')
-            
             logger.info("正在合并异动数据...")
             merged_data = pd.merge(merged_data, 
                                   market_data.jygs[available_jygs_columns], 
@@ -533,17 +532,12 @@ def generate_report(merged_first_board_data: pd.DataFrame,
         return f"📊 今日新兴热点分析\n❌ 生成报告时发生错误: {e}"
 
 
-def main() -> int:
+def merge():
     """
-    主函数：执行完整的数据处理流程
-    
-    Returns:
-        int: 退出码，0表示成功，1表示失败
+    合并股票池数据、市场数据、涨停数据和异动数据
     """
     try:
-        logger.info("=" * 50)
-        logger.info("开始执行每日数据处理主流程")
-        logger.info("=" * 50)
+        logger.info("开始执行合并数据主流程")
         
         # 获取当前交易日期
         current_date = trading_calendar.get_default_trade_date()
@@ -556,7 +550,6 @@ def main() -> int:
          market_overview_data, 
          zt_stocks_data, 
          jygs_data) = loaded_data
-        
         # 封装市场数据
         market_data = MarketData(market_overview_data, zt_stocks_data, jygs_data)
 
@@ -592,20 +585,13 @@ def main() -> int:
         dingding_robot.send_message(hotspots_report_msg, 'robot3')
         logger.info("新兴热点分析完成")
 
-        logger.info("=" * 50)
-        logger.info("每日数据处理主流程执行完成")
-        logger.info("=" * 50)
-        return 0
-            
-    except KeyboardInterrupt:
-        logger.info("用户中断程序执行")
-        return 1
+        logger.info("合并数据主流程执行完成")
+    
     except Exception as e:
         logger.error(f"程序执行失败: {e}")
         dingding_robot.send_message(f"每日数据处理失败: {e}", 'robot3')
-        return 1
+        raise
 
 
 if __name__ == "__main__":
-    exit_code = main()
-    sys.exit(exit_code)
+    merge()

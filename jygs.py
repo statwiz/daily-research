@@ -290,24 +290,14 @@ class JygsUtils:
     @staticmethod
     def read_stocks_data(prefix: str = 'jygs') -> pd.DataFrame:
         """读取最新异动数据"""
-        return pd.read_csv(os.path.join(JygsUtils.DATA_DIR, f"{prefix}.csv"), dtype={'code': str})
+        return pd.read_csv(os.path.join(JygsUtils.DATA_DIR, f"{prefix}.csv"), dtype={'code': str, '日期': str})
     @staticmethod
     def read_bk_data(prefix: str = 'jygs_bk_his') -> pd.DataFrame:
         """读取热点板块统计信息"""
         return pd.read_csv(os.path.join(JygsUtils.DATA_DIR, f"{prefix}.csv"), dtype={'交易日期': str})
 
-def update_jygs_daily_data(trading_date: str = None):
-    """更新韭研公社每日数据"""
-    logger.info("开始更新韭研公社每日数据")
-    try:
-        JygsUtils.update_daily_data(trading_date=trading_date)
-        dingding_robot.send_message(f"韭研公社每日数据保存完成", 'robot3')
-        return True
-    except Exception as e:
-        logger.error(f"更新韭研公社每日数据失败: {e}")
-        dingding_robot.send_message(f"韭研公社每日数据保存失败", 'robot3')
-        return False
+
 
 if __name__ == "__main__":
-    update_jygs_daily_data()
+    JygsUtils.update_daily_data()
     

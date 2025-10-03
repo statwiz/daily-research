@@ -308,7 +308,7 @@ class StockPool:
             self.logger.error(f"获取首板股票池数据失败: {e}")
             return None
 
-    def run(self):
+    def update_stock_pool_data(self):
         """
         简化的股票池数据获取任务 - 只负责数据获取和保存
         注意：主流程控制已移至 merge.py
@@ -349,7 +349,8 @@ class StockPool:
             raise
 
 
+
 if __name__ == "__main__":
     """主函数：使用StockPool类执行任务"""
     stock_pool = StockPool()
-    stock_pool.run()
+    stock_pool.update_stock_pool_data()

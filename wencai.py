@@ -17,7 +17,7 @@ from utils import execute_with_retry
 from notification import DingDingRobot
 from trading_calendar import TradingCalendar
 # 配置常量
-DEFAULT_DATA_DIR = "/Users/thua/Desktop/QFin/daily-research/data/csv"
+DEFAULT_DATA_DIR = "./data/csv"
 
 dingding_robot = DingDingRobot()
 logger = get_logger("wencai", "logs", "daily_research.log")
@@ -229,11 +229,11 @@ class WencaiUtils:
         start_time = time.time()
         if is_bj_exchange:
             logger.info("开始获取北交所市场全景数据")
-            query_text = 'A股,北交所,上市板块,上市天数,开盘价,最高价,最低价,收盘价,前复权:开盘价,前复权:最高价,前复权:最低价,前复权:收盘价,成交额,成交量,竞价涨幅,竞价金额,竞价量,实际换手率,自由流通市值,自由流通股,个股热度排名'
+            query_text = 'A股,北交所,上市板块,上市天数,开盘价,最高价,最低价,收盘价,前复权:开盘价,前复权:最高价,前复权:最低价,前复权:收盘价,成交额,成交量,竞价涨幅,竞价金额,竞价量,实际换手率,自由流通市值,自由流通股,个股热度排名,几天几板'
 
         else:
             logger.info("开始获取A股市场全景数据(非北交所)")
-            query_text = 'A股,非北交所,上市板块,上市天数,开盘价,最高价,最低价,收盘价,前复权:开盘价,前复权:最高价,前复权:最低价,前复权:收盘价,成交额,成交量,竞价涨幅,竞价金额,竞价量,dde大单净额,实际换手率,自由流通市值,自由流通股,个股热度排名'
+            query_text = 'A股,非北交所,上市板块,上市天数,开盘价,最高价,最低价,收盘价,前复权:开盘价,前复权:最高价,前复权:最低价,前复权:收盘价,成交额,成交量,竞价涨幅,竞价金额,竞价量,dde大单净额,实际换手率,自由流通市值,自由流通股,个股热度排名,几天几板'
         
         logger.info(f"查询语句: {query_text}")
         
@@ -290,6 +290,9 @@ class WencaiUtils:
             for col in str_columns:
                 if col in df.columns:
                     df[col] = df[col].astype(str)
+
+            # 几天几板
+            df['几天几板'] = df['几天几板'].fillna('其他')
             
             # 添加交易日期
             df['交易日期'] = trade_date
@@ -316,7 +319,7 @@ class WencaiUtils:
                 '成交额', '成交量', '市值Z', '换手Z',
                 '竞价涨幅', '竞价金额', '竞价量', '竞换手Z',
                 '开盘价_前', '最高价_前', '最低价_前', '收盘价_前',
-                '上市板块', '上市天数',
+                '上市板块', '上市天数', '几天几板',
                 'market_code', 'code'
             ]
             
@@ -638,6 +641,31 @@ class WencaiUtils:
     def update_daily_zt_data(data_dir: str = None) -> None:
         """保存每日涨停数据的主入口函数"""
         try:
+            # 设置默认数据目录
+            if data_dir is None:
+                data_dir = DEFAULT_DATA_DIR
+            
+            # 获取当前交易日期
+            trading_date = trading_calendar.get_default_trade_date()
+            
+            # 检查文件是否已存在且在15点后生成
+            ths_dir = os.path.join(data_dir, "ths")
+            file_path = os.path.join(ths_dir, f"ths_zt_{trading_date}.csv")
+            
+            if os.path.exists(file_path):
+                # 获取今天15点的时间戳
+                today = datetime.now().date()
+                cutoff_time = datetime.combine(today, datetime.min.time().replace(hour=15))
+                cutoff_timestamp = cutoff_time.timestamp()
+                
+                # 检查文件修改时间
+                file_mtime = os.path.getmtime(file_path)
+                if file_mtime >= cutoff_timestamp:
+                    logger.info(f"涨停数据文件已存在且在15点后生成，跳过更新: {file_path}")
+                    return
+                else:
+                    logger.info(f"涨停数据文件存在但在15点前生成，将重新更新: {file_path}")
+            
             # 获取涨停数据
             df = execute_with_retry(WencaiUtils.get_zt_stocks)
             if df.empty:
@@ -647,10 +675,6 @@ class WencaiUtils:
             # 从数据中提取交易日期
             trading_date = df['交易日期'].iloc[0]
             logger.info(f"从数据中提取到交易日期: {trading_date}")
-            
-            # 设置默认数据目录
-            if data_dir is None:
-                data_dir = DEFAULT_DATA_DIR
             
             logger.info(f"开始保存{trading_date}的涨停数据，共{len(df)}条记录")
             
@@ -670,6 +694,31 @@ class WencaiUtils:
     def update_daily_market_overview_data(data_dir: str = None) -> None:
         """保存每日行情数据的主入口函数"""
         try:
+            # 设置默认数据目录
+            if data_dir is None:
+                data_dir = DEFAULT_DATA_DIR
+            
+            # 获取当前交易日期
+            trading_date = trading_calendar.get_default_trade_date()
+            
+            # 检查文件是否已存在且在15点后生成
+            ths_dir = os.path.join(data_dir, "ths")
+            file_path = os.path.join(ths_dir, f"ths_market_overview_{trading_date}.csv")
+            
+            if os.path.exists(file_path):
+                # 获取今天15点的时间戳
+                today = datetime.now().date()
+                cutoff_time = datetime.combine(today, datetime.min.time().replace(hour=15))
+                cutoff_timestamp = cutoff_time.timestamp()
+                
+                # 检查文件修改时间
+                file_mtime = os.path.getmtime(file_path)
+                if file_mtime >= cutoff_timestamp:
+                    logger.info(f"行情数据文件已存在且在15点后生成，跳过更新: {file_path}")
+                    return
+                else:
+                    logger.info(f"行情数据文件存在但在15点前生成，将重新更新: {file_path}")
+            
             # 获取行情数据（非北交所）
             df = execute_with_retry(WencaiUtils.get_market_overview_data,loop=True)
             if df.empty:
@@ -683,10 +732,6 @@ class WencaiUtils:
             # 从数据中提取交易日期
             trading_date = df['交易日期'].iloc[0]
             logger.info(f"从数据中提取到交易日期: {trading_date}")
-            
-            # 设置默认数据目录
-            if data_dir is None:
-                data_dir = DEFAULT_DATA_DIR
             
             logger.info(f"开始保存{trading_date}的行情数据，共{len(df)}条记录")
             
@@ -728,39 +773,17 @@ class WencaiUtils:
         """读取涨停数据"""
         if date_str is None:
             date_str = trading_calendar.get_default_trade_date()
-        return pd.read_csv(os.path.join(DEFAULT_DATA_DIR, "ths", f"ths_zt_{date_str}.csv"), dtype={'code': str, 'market_code': str})
+        return pd.read_csv(os.path.join(DEFAULT_DATA_DIR, "ths", f"ths_zt_{date_str}.csv"), dtype={'code': str, 'market_code': str, '交易日期': str})
     # 读取最新涨停数据
     @staticmethod
     def read_latest_zt_stocks() -> pd.DataFrame:
         """读取最新涨停数据"""
-        return pd.read_csv(os.path.join(DEFAULT_DATA_DIR, "ths", "ths_zt.csv"), dtype={'code': str, 'market_code': str})
+        return pd.read_csv(os.path.join(DEFAULT_DATA_DIR, "ths", "ths_zt.csv"), dtype={'code': str, 'market_code': str, '交易日期': str})
     
 
-
-
-def update_ths_daily_data():
-    """更新同花顺每日数据（行情+涨停），两个任务独立执行"""
-    logger.info("开始更新同花顺每日数据")
-    
-    # 更新行情数据
-    try:
-        WencaiUtils.update_daily_market_overview_data()
-        dingding_robot.send_message("同花顺行情数据保存完成", 'robot3')
-    except Exception as e:
-        logger.error(f"保存每日行情数据失败: {e}")
-    
-    # 更新涨停数据  
-    try:
-        WencaiUtils.update_daily_zt_data()
-        dingding_robot.send_message("同花顺涨停数据保存完成", 'robot3')
-    except Exception as e:
-        logger.error(f"保存每日涨停数据失败: {e}")
-    
-    logger.info("同花顺每日数据更新完成")
 
 
 
 
 if __name__ == "__main__":
-    # update_ths_daily_data()
-    print(WencaiUtils.get_first_breakout_stocks())
+    WencaiUtils.update_daily_market_overview_data()
