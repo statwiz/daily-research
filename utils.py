@@ -92,15 +92,6 @@ def check_file_exists_after_time(file_path: str, cutoff_hour: int = 16) -> bool:
         return False
 
 
-# 这里可以添加其他纯工具函数，例如：
-# def format_date(date_str):
-#     """格式化日期字符串"""
-#     pass
-# 
-# def calculate_percentage(value1, value2):
-#     """计算百分比"""
-#     pass
-
 
 if __name__ == "__main__":
     # 测试工具函数
