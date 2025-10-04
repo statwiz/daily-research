@@ -5,9 +5,17 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import os
+from trading_calendar import TradingCalendar
 
 import warnings
 warnings.filterwarnings("ignore")
+
+# 初始化交易日历
+trading_calendar = TradingCalendar()
+
+# 动态获取交易日期并配置基础路径
+TRADE_DATE = trading_calendar.get_default_trade_date()
+BASE_PATH = f"./output/{TRADE_DATE}/"
 
 # 日期名称映射
 day_map = {
@@ -23,7 +31,7 @@ day_map = {
 def load_data(file_path):
     """加载数据并进行预处理"""
     try:
-        df = pd.read_csv(file_path)
+        df = pd.read_csv(file_path,dtype={'交易日期': str})
         # 转换日期格式
         df['交易日期'] = pd.to_datetime(df['交易日期'], format='%Y%m%d')
         # 重命名列以便后续处理
@@ -270,17 +278,115 @@ def plot_hotspot_rotation(df):
     st.plotly_chart(fig, use_container_width=True)
     
 
+def display_csv_data(file_path, title, description=""):
+    """展示CSV文件数据"""
+    if not os.path.exists(file_path):
+        st.warning(f"{title}数据文件不存在")
+        return
+    
+    try:
+        df = pd.read_csv(file_path,dtype={'交易日期': str,'涨停日期': str,'异动日期': str})
+        
+        # 显示标题和描述
+        st.subheader(f"📊 {title}")
+        if description:
+            st.markdown(description)
+        
+        # 显示基本统计信息
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("总记录数", len(df))
+        with col2:
+            if '热点' in df.columns:
+                unique_hotspots = df['热点'].nunique()
+                st.metric("热点数量", unique_hotspots)
+            else:
+                st.metric("列数", len(df.columns))
+        with col3:
+            if '涨跌幅' in df.columns:
+                avg_change = df['涨跌幅'].mean()
+                st.metric("平均涨跌幅", f"{avg_change:.2f}%")
+            elif '股票简称' in df.columns:
+                st.metric("股票数量", len(df))
+        
+        # 显示数据表格
+        st.dataframe(
+            df, 
+            use_container_width=True,
+            height=400
+        )
+        
+        # 如果有热点列，显示热点分布
+        if '热点' in df.columns and len(df) > 0:
+            st.markdown("**热点分布：**")
+            
+            # 应用相似热点合并逻辑
+            df_unified = unify_similar_hotspots(df)
+            
+            # 过滤掉不需要的热点
+            filtered_hotspots = df_unified[
+                ~df_unified['热点'].isin(['其他', '公告', 'ST板块'])
+            ]['热点'].value_counts()
+            
+            # 按数量从小到大排序（升序）
+            filtered_hotspots = filtered_hotspots.sort_values(ascending=True)
+            
+            if len(filtered_hotspots) > 0:
+                # 使用 plotly 创建柱状图以确保正确排序
+                fig = go.Figure(data=[
+                    go.Bar(
+                        x=filtered_hotspots.index,
+                        y=filtered_hotspots.values,
+                        text=filtered_hotspots.values,
+                        textposition='auto',
+                    )
+                ])
+                
+                fig.update_layout(
+                    title="热点股票数量分布",
+                    xaxis_title="热点",
+                    yaxis_title="股票数量",
+                    height=400,
+                    showlegend=False
+                )
+                
+                # 确保x轴按照我们排序的顺序显示
+                fig.update_xaxes(categoryorder='array', categoryarray=filtered_hotspots.index.tolist())
+                
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("过滤后没有可显示的热点数据")
+            
+    except Exception as e:
+        st.error(f"加载{title}数据失败: {e}")
+
 def main():
     """主函数"""
     st.set_page_config(
-        page_title="热点轮动",
+        page_title="股票分析仪表板",
         page_icon="📈",
         layout="wide"
     )
     
-    st.title("📈 热点轮动")
-    st.markdown("---")
+    # 创建侧边栏导航
+    st.sidebar.title("📊 导航菜单")
+    page = st.sidebar.selectbox(
+        "选择页面",
+        ["热点轮动", "股票池数据"]
+    )
     
+    if page == "热点轮动":
+        st.title("📈 热点轮动")
+        st.markdown("---")
+        show_hotspot_rotation()
+        
+    elif page == "股票池数据":
+        st.title("📊 股票池数据")
+        st.markdown("---")
+        show_stock_pool_data()
+
+def show_hotspot_rotation():
+    """显示热点轮动页面"""
     # 数据文件路径
     data_path = "./data/csv/jygs/jygs_bk_his.csv"
     
@@ -297,41 +403,58 @@ def main():
         
         # 绘制热点轮动图
         plot_hotspot_rotation(unified_data)
-        
-        # 添加分隔线
-        st.markdown("---")
-        st.subheader("📊 热点分布分析")
-        
-        # 加载股票数据文件
-        core_stocks_path = "./output/20250930/core_stocks.csv"
-        first_stocks_path = "./output/20250930/first_stocks.csv"
-        
-        # 创建两列布局
-        col1, col2 = st.columns(2)
-        
-        # 加载并显示高位股饼状图
-        if os.path.exists(core_stocks_path):
-            with col1:
-                core_df = pd.read_csv(core_stocks_path)
-                # 应用相似热点合并逻辑
-                core_df = unify_similar_hotspots(core_df)
-                plot_pie(core_df, "高位股")
-        else:
-            with col1:
-                st.warning("高位股数据文件不存在")
-        
-        # 加载并显示低位股饼状图
-        if os.path.exists(first_stocks_path):
-            with col2:
-                first_df = pd.read_csv(first_stocks_path)
-                # 应用相似热点合并逻辑
-                first_df = unify_similar_hotspots(first_df)
-                plot_pie(first_df, "低位股")
-        else:
-            with col2:
-                st.warning("低位股数据文件不存在")
     else:
         st.error("无法加载数据，请检查文件路径和格式")
+
+def show_stock_pool_data():
+    """显示股票池数据页面"""
+    # 文件路径配置
+    files_config = {
+        "core_stocks.csv": {
+            "title": "高位股票池",
+            "description": "包含高位股票的详细信息，包括市值、涨跌幅、热点等数据"
+        },
+        "first_stocks.csv": {
+            "title": "低位股票池", 
+            "description": "包含低位股票的详细信息，适合关注的潜力股票"
+        },
+        "add.csv": {
+            "title": "新增股票",
+            "description": "最新加入股票池的股票列表"
+        },
+        "remove.csv": {
+            "title": "移除股票",
+            "description": "从股票池中移除的股票列表"
+        },
+        "emerging_hotspots.csv": {
+            "title": "新兴热点",
+            "description": "新出现的市场热点和相关股票"
+        }
+    }
+    
+    
+    # 创建标签页
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["高位股票池", "低位股票池", "新增股票", "移除股票", "新兴热点"])
+    
+    with tab1:
+        file_path = os.path.join(BASE_PATH, "core_stocks.csv")
+        display_csv_data(file_path, "高位股票池", files_config["core_stocks.csv"]["description"])
+    
+    with tab2:
+        file_path = os.path.join(BASE_PATH, "first_stocks.csv")
+        display_csv_data(file_path, "低位股票池", files_config["first_stocks.csv"]["description"])
+    
+    with tab3:
+        file_path = os.path.join(BASE_PATH, "add.csv")
+        display_csv_data(file_path, "新增股票", files_config["add.csv"]["description"])
+    
+    with tab4:
+        file_path = os.path.join(BASE_PATH, "remove.csv") 
+        display_csv_data(file_path, "移除股票", files_config["remove.csv"]["description"])
+    
+    with tab5:
+        file_path = os.path.join(BASE_PATH, "emerging_hotspots.csv")
+        display_csv_data(file_path, "新兴热点", files_config["emerging_hotspots.csv"]["description"])
 
 if __name__ == "__main__":
     main()
