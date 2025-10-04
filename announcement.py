@@ -4,15 +4,20 @@ import os
 from notification import DingDingRobot
 from utils import execute_with_retry
 dingding_robot = DingDingRobot()
-
+DEFAULT_DATA_DIR = './data'
 def main():
     try:
+        '''
+        三季报业绩预增股票20250930
+        '''
         stock_yjyg_em_df = execute_with_retry(ak.stock_yjyg_em, date="20250930")
         cond = (stock_yjyg_em_df['预测指标']=='扣除非经常性损益后的净利润') & (stock_yjyg_em_df['预告类型']=='预增')
         stock_yjyg_em_df = stock_yjyg_em_df[cond]
         output_columns = ['股票简称', '业绩变动幅度','预测数值', '公告日期']
-        if os.path.exists('stock_yjyg_em_df.xlsx'):
-            stock_yjyg_em_df_pre = pd.read_excel('stock_yjyg_em_df.xlsx')
+
+        file_path = os.path.join(DEFAULT_DATA_DIR, "xlsx", "stock_yjyg_em_df.xlsx")
+        if os.path.exists(file_path):
+            stock_yjyg_em_df_pre = pd.read_excel(file_path)
         else:
             stock_yjyg_em_df_pre = pd.DataFrame(columns=output_columns)
         # 对比两个数据框，新增股票发送到钉钉
@@ -44,7 +49,10 @@ def main():
         else:
             print("没有新增业绩预增股票")
         # 保存数据
-        stock_yjyg_em_df.to_excel('stock_yjyg_em_df.xlsx', index=False)
+        xlsx_dir = os.path.join(DEFAULT_DATA_DIR, "xlsx")
+        os.makedirs(xlsx_dir, exist_ok=True)
+        stock_yjyg_em_df.to_excel(file_path, index=False)
+        print(f"保存数据到: {file_path}")
     except Exception as e:
         print(e)
         dingding_robot.send_message(f"新增业绩预增股票取数失败: {e}", 'robot4')

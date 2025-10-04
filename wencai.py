@@ -211,7 +211,7 @@ class WencaiUtils:
             raise
     
     @staticmethod
-    def get_market_overview_data(loop: bool = False, is_bj_exchange: bool = False) -> pd.DataFrame:
+    def get_market_overview_data(trade_date: str = None, loop: bool = False, is_bj_exchange: bool = False) -> pd.DataFrame:
         """
         获取A股市场全景数据，包含基础行情、资金流向、热度等信息
         
@@ -244,9 +244,13 @@ class WencaiUtils:
             
             # 数据处理
             df = raw_df.copy()
-            trade_date = WencaiUtils.extract_trade_date(df)
+            extract_trade_date = WencaiUtils.extract_trade_date(df)
+            if trade_date is None:
+                trade_date = trading_calendar.get_default_trade_date()            
+            if trade_date and trade_date != extract_trade_date:
+                raise Exception(f"获取行情数据失败, 交易日期不一致: 当前交易日期{trade_date} != 提取的交易日期{extract_trade_date}")
+
             df = WencaiUtils.remove_date_suffix(df)
-            
             # 列名映射
             if is_bj_exchange:
                 df['dde大单净额'] = 0
@@ -334,7 +338,7 @@ class WencaiUtils:
             raise
 
     @staticmethod
-    def get_zt_stocks() -> pd.DataFrame:
+    def get_zt_stocks(trade_date: str = None) -> pd.DataFrame:
         """
         获取今日涨停股票数据，包含涨停相关的详细信息
         
@@ -365,7 +369,12 @@ class WencaiUtils:
             
             # 数据处理
             df = raw_df.copy()
-            trade_date = WencaiUtils.extract_trade_date(df)
+            extract_trade_date = WencaiUtils.extract_trade_date(df)
+            if trade_date is None:
+                trade_date = trading_calendar.get_default_trade_date()
+            if trade_date and trade_date != extract_trade_date:
+                raise Exception(f"获取涨停股票数据失败, 交易日期不一致: 当前交易日期{trade_date} != 提取的交易日期{extract_trade_date}")
+
             df = WencaiUtils.remove_date_suffix(df)
             
             # 列名映射
@@ -421,7 +430,7 @@ class WencaiUtils:
             raise
     
     @staticmethod
-    def get_dt_stocks() -> pd.DataFrame:
+    def get_dt_stocks(trade_date: str = None) -> pd.DataFrame:
         """
         获取今日跌停股票数据，包含跌停相关的详细信息
         
@@ -449,7 +458,11 @@ class WencaiUtils:
             
             # 数据处理
             df = raw_df.copy()
-            trade_date = WencaiUtils.extract_trade_date(df)
+            extract_trade_date = WencaiUtils.extract_trade_date(df)
+            if trade_date is None:
+                trade_date = trading_calendar.get_default_trade_date()            
+            if trade_date and trade_date != extract_trade_date:
+                raise Exception(f"获取跌停股票数据失败, 交易日期不一致: 当前交易日期{trade_date} != 提取的交易日期{extract_trade_date}")
             df = WencaiUtils.remove_date_suffix(df)
             
             # 列名映射
@@ -505,7 +518,7 @@ class WencaiUtils:
             raise
     
     @staticmethod
-    def get_zb_stocks() -> pd.DataFrame:
+    def get_zb_stocks(trade_date: str = None) -> pd.DataFrame:
         """
         获取今日炸板股票数据（曾涨停但未封住涨停的股票）
         
@@ -529,7 +542,11 @@ class WencaiUtils:
             
             # 数据处理
             df = raw_df.copy()
-            trade_date = WencaiUtils.extract_trade_date(df)
+            extract_trade_date = WencaiUtils.extract_trade_date(df)
+            if trade_date is None:
+                trade_date = trading_calendar.get_default_trade_date()            
+            if trade_date and trade_date != extract_trade_date:
+                raise Exception(f"获取炸板股票数据失败, 交易日期不一致: 当前交易日期{trade_date} != 提取的交易日期{extract_trade_date}")    
             df = WencaiUtils.remove_date_suffix(df)
             
             # 列名映射
@@ -586,7 +603,8 @@ class WencaiUtils:
             # 确保ths目录存在
             ths_dir = os.path.join(data_dir, "ths")
             os.makedirs(ths_dir, exist_ok=True)
-            
+            if trading_date is None:
+                trading_date = trading_calendar.get_default_trade_date()
             # 保存当日涨停数据到独立文件
             daily_file_path = os.path.join(ths_dir, f"ths_zt_{trading_date}.csv")
             
@@ -604,7 +622,8 @@ class WencaiUtils:
             # 确保ths目录存在
             ths_dir = os.path.join(data_dir, "ths")
             os.makedirs(ths_dir, exist_ok=True)
-            
+            if trading_date is None:
+                trading_date = trading_calendar.get_default_trade_date()
             latest_file = os.path.join(ths_dir, "ths_zt.csv")
             
             if os.path.exists(latest_file):
@@ -655,34 +674,30 @@ class WencaiUtils:
             if os.path.exists(file_path):
                 # 获取今天15点的时间戳
                 today = datetime.now().date()
-                cutoff_time = datetime.combine(today, datetime.min.time().replace(hour=15))
+                cutoff_time = datetime.combine(today, datetime.min.time().replace(hour=16))
                 cutoff_timestamp = cutoff_time.timestamp()
                 
                 # 检查文件修改时间
                 file_mtime = os.path.getmtime(file_path)
                 if file_mtime >= cutoff_timestamp:
-                    logger.info(f"涨停数据文件已存在且在15点后生成，跳过更新: {file_path}")
+                    logger.info(f"涨停数据文件已存在且在16点后生成，跳过更新: {file_path}")
                     return
                 else:
-                    logger.info(f"涨停数据文件存在但在15点前生成，将重新更新: {file_path}")
+                    logger.info(f"涨停数据文件存在但在16点前生成，将重新更新: {file_path}")
             
             # 获取涨停数据
-            df = execute_with_retry(WencaiUtils.get_zt_stocks)
+            df = execute_with_retry(WencaiUtils.get_zt_stocks, trade_date=trading_date)
             if df.empty:
                 logger.error("无涨停数据，跳过保存")
                 raise Exception("无涨停数据，跳过保存")
             
-            # 从数据中提取交易日期
-            trading_date = df['交易日期'].iloc[0]
-            logger.info(f"从数据中提取到交易日期: {trading_date}")
-            
             logger.info(f"开始保存{trading_date}的涨停数据，共{len(df)}条记录")
             
             # 1. 保存同花顺涨停个股数据到历史文件和当日文件
-            WencaiUtils._update_zt_stocks_data(df, trading_date, data_dir)
+            WencaiUtils._update_zt_stocks_data(df, trading_date = trading_date, data_dir = data_dir)
 
             # 2. 更新最新同花顺涨停股票数据文件
-            WencaiUtils._update_latest_zt_data(df, data_dir)
+            WencaiUtils._update_latest_zt_data(df, data_dir = data_dir)
             
             logger.info(f"完成{trading_date}同花顺涨停数据保存")
 
@@ -701,41 +716,38 @@ class WencaiUtils:
             # 获取当前交易日期
             trading_date = trading_calendar.get_default_trade_date()
             
-            # 检查文件是否已存在且在15点后生成
+            # 检查文件是否已存在且在16点后生成
             ths_dir = os.path.join(data_dir, "ths")
             file_path = os.path.join(ths_dir, f"ths_market_overview_{trading_date}.csv")
             
             if os.path.exists(file_path):
-                # 获取今天15点的时间戳
+                # 获取今天16点的时间戳
                 today = datetime.now().date()
-                cutoff_time = datetime.combine(today, datetime.min.time().replace(hour=15))
+                cutoff_time = datetime.combine(today, datetime.min.time().replace(hour=16))
                 cutoff_timestamp = cutoff_time.timestamp()
                 
                 # 检查文件修改时间
                 file_mtime = os.path.getmtime(file_path)
                 if file_mtime >= cutoff_timestamp:
-                    logger.info(f"行情数据文件已存在且在15点后生成，跳过更新: {file_path}")
+                    logger.info(f"行情数据文件已存在且在16点后生成，跳过更新: {file_path}")
                     return
                 else:
-                    logger.info(f"行情数据文件存在但在15点前生成，将重新更新: {file_path}")
+                    logger.info(f"行情数据文件存在但在16点前生成，将重新更新: {file_path}")
             
             # 获取行情数据（非北交所）
-            df = execute_with_retry(WencaiUtils.get_market_overview_data,loop=True)
+            df = execute_with_retry(WencaiUtils.get_market_overview_data, trade_date=trading_date, loop=True)
             if df.empty:
                 logger.error("无行情数据（非北交所），跳过保存")
                 raise Exception("无行情数据（非北交所），跳过保存")
-            df_bj = execute_with_retry(WencaiUtils.get_market_overview_data, loop=True,is_bj_exchange=True)
+            df_bj = execute_with_retry(WencaiUtils.get_market_overview_data, trade_date=trading_date, loop=True, is_bj_exchange=True)
             if df_bj.empty:
                 logger.error("无行情数据（北交所），跳过保存")
                 raise Exception("无行情数据（北交所），跳过保存")
             df = pd.concat([df, df_bj])
-            # 从数据中提取交易日期
-            trading_date = df['交易日期'].iloc[0]
-            logger.info(f"从数据中提取到交易日期: {trading_date}")
             
             logger.info(f"开始保存{trading_date}的行情数据，共{len(df)}条记录")
             
-            WencaiUtils._update_market_overview_data(df, trading_date, data_dir)
+            WencaiUtils._update_market_overview_data(df, trading_date = trading_date, data_dir = data_dir)
             
             logger.info(f"完成{trading_date}行情数据保存")
             
@@ -750,7 +762,8 @@ class WencaiUtils:
             # 确保ths目录存在
             ths_dir = os.path.join(data_dir, "ths")
             os.makedirs(ths_dir, exist_ok=True)
-            
+            if trading_date is None:
+                trading_date = trading_calendar.get_default_trade_date()
             # 保存当日行情数据到独立文件
             daily_file_path = os.path.join(ths_dir, f"ths_market_overview_{trading_date}.csv")
             
@@ -787,3 +800,4 @@ class WencaiUtils:
 
 if __name__ == "__main__":
     WencaiUtils.update_daily_market_overview_data()
+    WencaiUtils.update_daily_zt_data()

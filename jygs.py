@@ -14,6 +14,7 @@ from typing import Optional
 from log_setup import get_logger
 from utils import execute_with_retry
 from notification import DingDingRobot
+from datetime import datetime
 # 设置日志记录器
 logger = get_logger("jygs", "logs", "daily_research.log")
 trading_calendar = TradingCalendar()
@@ -96,8 +97,7 @@ class JygsUtils:
     def _get_single_date_data(session: requests.Session, trading_date: str = None) -> pd.DataFrame:
         """获取指定交易日的异动解析数据"""
         if trading_date is None:
-            recent_days = execute_with_retry(trading_calendar.get_recent_trading_days, k=1)
-            trading_date = recent_days[0]
+            trading_date = trading_calendar.get_default_trade_date()
             
         logger.info(f"获取{trading_date}异动解析数据")
         
@@ -141,7 +141,7 @@ class JygsUtils:
                         '解析': '\n'.join(expound_parts[1:]) if len(expound_parts) > 1 else '',
                         '热点': hotspot_name,
                         '热点导火索': hotspot_reason,
-                        '日期': trading_date
+                        '交易日期': trading_date
                     })
             
             df = pd.DataFrame(stocks_data)
@@ -157,25 +157,14 @@ class JygsUtils:
         """保存解析数据到历史文件"""
         try:
             if trading_date is None:
-                trading_date = df['日期'].iloc[0]   
+                trading_date = trading_calendar.get_default_trade_date()
 
-            his_file_path = os.path.join(data_dir, "jygs_his.csv")
+            # 使用交易日期作为文件名
+            his_file_path = os.path.join(data_dir, f"jygs_{trading_date}.csv")
             
-            if os.path.exists(his_file_path):
-                existing_df = pd.read_csv(his_file_path, dtype={'日期': str})
-                
-                # 从原文件中删除与新数据相同日期的记录，确保最新数据覆盖旧数据
-                existing_df = existing_df[existing_df['日期'] != trading_date]
-                logger.info(f"已从原文件中删除旧解析数据，准备添加最新数据")
-                
-                combined_df = pd.concat([df, existing_df], ignore_index=True)
-            else:
-                combined_df = df
-            
-            # 按日期倒序排列并保存
-            combined_df = combined_df.sort_values('日期', ascending=False)
-            combined_df.to_csv(his_file_path, index=False, encoding='utf-8-sig')
-            logger.info(f"追加解析数据到: {his_file_path}，共{len(df)}条新记录")
+            # 直接保存当天数据到单独文件
+            df.to_csv(his_file_path, index=False, encoding='utf-8-sig')
+            logger.info(f"保存解析数据到: {his_file_path}，共{len(df)}条记录")
             
         except Exception as e:
             logger.error(f"保存{trading_date}解析数据失败: {e}")
@@ -186,10 +175,10 @@ class JygsUtils:
         """保存热点板块统计信息"""
         try:
             if trading_date is None:
-                trading_date = df['日期'].iloc[0]
+                trading_date = trading_calendar.get_default_trade_date()
 
             # 生成板块统计数据
-            hotspot_stats = df.groupby(['热点', '日期']).size().reset_index(name='股票数量')
+            hotspot_stats = df.groupby(['热点', '交易日期']).size().reset_index(name='股票数量')
             hotspot_stats['交易日期'] = trading_date
             hotspot_stats = hotspot_stats[['交易日期', '热点', '股票数量']]
             print(hotspot_stats.head())
@@ -224,25 +213,25 @@ class JygsUtils:
             
             if os.path.exists(latest_file):
                 # 读取现有数据
-                existing_df = pd.read_csv(latest_file, dtype={'日期': str})
+                existing_df = pd.read_csv(latest_file, dtype={'交易日期': str})
                 
                 # 获取新数据中的日期
-                new_dates = set(new_data['日期'].unique())
+                new_dates = set(new_data['交易日期'].unique())
                 
                 # 从原文件中删除与新数据相同日期的记录，确保最新数据覆盖旧数据
-                existing_df = existing_df[~existing_df['日期'].isin(new_dates)]
+                existing_df = existing_df[~existing_df['交易日期'].isin(new_dates)]
                 logger.info(f"已从原文件中删除日期 {new_dates} 的旧数据，准备添加最新数据")
                 
                 # 合并数据
                 combined_df = pd.concat([existing_df, new_data], ignore_index=True)
                 
                 # 对每只股票只保留最新日期的记录
-                latest_df = combined_df.sort_values('日期', ascending=False).groupby('股票简称').first().reset_index()
+                latest_df = combined_df.sort_values('交易日期', ascending=False).groupby('股票简称').first().reset_index()
             else:
                 latest_df = new_data
             
             # 按日期倒序排列（最新日期在最上方）
-            latest_df = latest_df.sort_values('日期', ascending=False)
+            latest_df = latest_df.sort_values('交易日期', ascending=False)
             
             # 保存更新后的数据
             latest_df.to_csv(latest_file, index=False, encoding='utf-8-sig')
@@ -256,16 +245,33 @@ class JygsUtils:
     def update_daily_data(trading_date: str = None, data_dir: str = None, session: requests.Session = None) -> None:
         """保存每日异动数据的主入口函数"""
         try:
+            if trading_date is None:
+                trading_date = trading_calendar.get_default_trade_date()
+            
+            # 创建数据目录
+            data_dir = data_dir or JygsUtils.DATA_DIR
+            os.makedirs(data_dir, exist_ok=True)
+            
+            # 检查文件是否已存在且是16点后生成的
+            his_file_path = os.path.join(data_dir, f"jygs_{trading_date}.csv")
+            if os.path.exists(his_file_path):
+                # 获取文件修改时间
+                file_mtime = os.path.getmtime(his_file_path)
+                file_datetime = datetime.fromtimestamp(file_mtime)
+                
+                # 检查是否是16点后生成的文件
+                if file_datetime.hour >= 16:
+                    logger.info(f"文件 {his_file_path} 已存在且生成时间为 {file_datetime.strftime('%Y-%m-%d %H:%M:%S')} (16点后)，跳过重复生成")
+                    return
+                else:
+                    logger.info(f"文件 {his_file_path} 存在但生成时间为 {file_datetime.strftime('%Y-%m-%d %H:%M:%S')} (16点前)，将重新生成")
+        
             session = session or execute_with_retry(JygsUtils._get_session)
             df = execute_with_retry(JygsUtils._get_single_date_data, session = session, trading_date = trading_date)
             
             if df.empty:
                 logger.error(f"{trading_date}无异动数据，跳过保存")
                 raise Exception(f"{trading_date}无异动数据，跳过保存")
-            
-            # 创建数据目录
-            data_dir = data_dir or JygsUtils.DATA_DIR
-            os.makedirs(data_dir, exist_ok=True)
             
             logger.info(f"开始保存异动数据，共{len(df)}条记录")
             
@@ -290,7 +296,7 @@ class JygsUtils:
     @staticmethod
     def read_stocks_data(prefix: str = 'jygs') -> pd.DataFrame:
         """读取最新异动数据"""
-        return pd.read_csv(os.path.join(JygsUtils.DATA_DIR, f"{prefix}.csv"), dtype={'code': str, '日期': str})
+        return pd.read_csv(os.path.join(JygsUtils.DATA_DIR, f"{prefix}.csv"), dtype={'code': str, '交易日期': str})
     @staticmethod
     def read_bk_data(prefix: str = 'jygs_bk_his') -> pd.DataFrame:
         """读取热点板块统计信息"""

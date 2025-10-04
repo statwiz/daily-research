@@ -309,19 +309,9 @@ class StockPool:
             return None
 
     def update_stock_pool_data(self):
-        """
-        简化的股票池数据获取任务 - 只负责数据获取和保存
-        注意：主流程控制已移至 merge.py
-        """
-        self.logger.info("开始执行股票池数据获取任务...")
-        
-        # 检查是否为交易日（可选，根据需要启用）
-        # today = datetime.now().strftime('%Y%m%d')
-        # if not self.trading_calendar.is_trading_day(today):
-        #     self.logger.info(f"今日({today})非交易日，跳过执行")
-        #     return
-        
+
         try:
+            self.logger.info("开始执行股票池数据获取任务...")
             trade_date = trading_calendar.get_default_trade_date()
             # 步骤1: 获取核心股票池数据
             core_df = self.get_core_stocks_data()
@@ -351,6 +341,5 @@ class StockPool:
 
 
 if __name__ == "__main__":
-    """主函数：使用StockPool类执行任务"""
     stock_pool = StockPool()
     stock_pool.update_stock_pool_data()

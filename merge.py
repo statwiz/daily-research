@@ -206,7 +206,7 @@ def load_all_data() -> Optional[Tuple]:
             logger.error("异动股票数据为空")
             raise Exception("异动股票数据为空")
         logger.info(f"异动股票数据量: {len(jygs_data)}")
-        jygs_data.rename(columns={'日期': '异动日期'}, inplace=True)
+        jygs_data.rename(columns={'交易日期': '异动日期'}, inplace=True)
         
         logger.info("所有必要的数据加载完成")
         return (core_stocks_data, 
