@@ -57,6 +57,41 @@ def execute_with_retry(func, max_retry_count=3, retry_base_delay=3, *args, **kwa
     raise last_exception
 
 
+def check_file_exists_after_time(file_path: str, cutoff_hour: int = 16) -> bool:
+    """
+    检查文件是否存在且在指定时间点后生成
+    
+    Args:
+        file_path: 文件路径
+        cutoff_hour: 截止时间点(小时)，默认16点
+    
+    Returns:
+        bool: 如果文件存在且在指定时间后生成返回True，否则返回False
+    """
+    import os
+    from datetime import datetime
+    
+    # 检查文件是否存在
+    if not os.path.exists(file_path):
+        return False
+    
+    try:
+        # 获取文件修改时间
+        file_mtime = os.path.getmtime(file_path)
+        file_datetime = datetime.fromtimestamp(file_mtime)
+        
+        # 获取今天指定时间点的时间戳
+        today = datetime.now().date()
+        cutoff_time = datetime.combine(today, datetime.min.time().replace(hour=cutoff_hour))
+        
+        # 比较文件修改时间和截止时间
+        return file_datetime >= cutoff_time
+        
+    except OSError as e:
+        logger.warning(f"获取文件时间失败: {file_path}, 错误: {e}")
+        return False
+
+
 # 这里可以添加其他纯工具函数，例如：
 # def format_date(date_str):
 #     """格式化日期字符串"""

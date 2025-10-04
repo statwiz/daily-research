@@ -12,7 +12,7 @@ from random import randint
 import execjs
 from typing import Optional
 from log_setup import get_logger
-from utils import execute_with_retry
+from utils import execute_with_retry, check_file_exists_after_time
 from notification import DingDingRobot
 from datetime import datetime
 # 设置日志记录器
@@ -154,17 +154,17 @@ class JygsUtils:
     
     @staticmethod
     def _update_stocks_data(df: pd.DataFrame, trading_date: str, data_dir: str) -> None:
-        """保存解析数据到历史文件"""
+        """保存解析数据到文件"""
         try:
             if trading_date is None:
                 trading_date = trading_calendar.get_default_trade_date()
 
             # 使用交易日期作为文件名
-            his_file_path = os.path.join(data_dir, f"jygs_{trading_date}.csv")
+            file_path = os.path.join(data_dir, f"jygs_{trading_date}.csv")
             
             # 直接保存当天数据到单独文件
-            df.to_csv(his_file_path, index=False, encoding='utf-8-sig')
-            logger.info(f"保存解析数据到: {his_file_path}，共{len(df)}条记录")
+            df.to_csv(file_path, index=False, encoding='utf-8-sig')
+            logger.info(f"保存解析数据到: {file_path}，共{len(df)}条记录")
             
         except Exception as e:
             logger.error(f"保存{trading_date}解析数据失败: {e}")
@@ -253,18 +253,12 @@ class JygsUtils:
             os.makedirs(data_dir, exist_ok=True)
             
             # 检查文件是否已存在且是16点后生成的
-            his_file_path = os.path.join(data_dir, f"jygs_{trading_date}.csv")
-            if os.path.exists(his_file_path):
-                # 获取文件修改时间
-                file_mtime = os.path.getmtime(his_file_path)
-                file_datetime = datetime.fromtimestamp(file_mtime)
-                
-                # 检查是否是16点后生成的文件
-                if file_datetime.hour >= 16:
-                    logger.info(f"文件 {his_file_path} 已存在且生成时间为 {file_datetime.strftime('%Y-%m-%d %H:%M:%S')} (16点后)，跳过重复生成")
-                    return
-                else:
-                    logger.info(f"文件 {his_file_path} 存在但生成时间为 {file_datetime.strftime('%Y-%m-%d %H:%M:%S')} (16点前)，将重新生成")
+            file_path = os.path.join(data_dir, f"jygs_{trading_date}.csv")
+            if check_file_exists_after_time(file_path, cutoff_hour=16):
+                logger.info(f"文件 {file_path} 已存在且在16点后生成，跳过重复生成")
+                return
+            elif os.path.exists(file_path):
+                logger.info(f"文件 {file_path} 存在但在16点前生成，将重新生成")
         
             session = session or execute_with_retry(JygsUtils._get_session)
             df = execute_with_retry(JygsUtils._get_single_date_data, session = session, trading_date = trading_date)
@@ -275,7 +269,7 @@ class JygsUtils:
             
             logger.info(f"开始保存异动数据，共{len(df)}条记录")
             
-            # 1. 保存异动个股数据到历史文件
+            # 1. 保存异动个股数据到文件
             JygsUtils._update_stocks_data(df, trading_date, data_dir)
             
             # 2. 保存异动热点板块统计信息

@@ -13,7 +13,7 @@ import os
 from typing import Optional
 import logging
 from log_setup import get_logger
-from utils import execute_with_retry
+from utils import execute_with_retry, check_file_exists_after_time
 from notification import DingDingRobot
 from trading_calendar import TradingCalendar
 # 配置常量
@@ -667,23 +667,15 @@ class WencaiUtils:
             # 获取当前交易日期
             trading_date = trading_calendar.get_default_trade_date()
             
-            # 检查文件是否已存在且在15点后生成
+            # 检查文件是否已存在且在16点后生成
             ths_dir = os.path.join(data_dir, "ths")
             file_path = os.path.join(ths_dir, f"ths_zt_{trading_date}.csv")
             
-            if os.path.exists(file_path):
-                # 获取今天15点的时间戳
-                today = datetime.now().date()
-                cutoff_time = datetime.combine(today, datetime.min.time().replace(hour=16))
-                cutoff_timestamp = cutoff_time.timestamp()
-                
-                # 检查文件修改时间
-                file_mtime = os.path.getmtime(file_path)
-                if file_mtime >= cutoff_timestamp:
-                    logger.info(f"涨停数据文件已存在且在16点后生成，跳过更新: {file_path}")
-                    return
-                else:
-                    logger.info(f"涨停数据文件存在但在16点前生成，将重新更新: {file_path}")
+            if check_file_exists_after_time(file_path, cutoff_hour=16):
+                logger.info(f"涨停数据文件已存在且在16点后生成，跳过更新: {file_path}")
+                return
+            elif os.path.exists(file_path):
+                logger.info(f"涨停数据文件存在但在16点前生成，将重新更新: {file_path}")
             
             # 获取涨停数据
             df = execute_with_retry(WencaiUtils.get_zt_stocks, trade_date=trading_date)
@@ -720,19 +712,11 @@ class WencaiUtils:
             ths_dir = os.path.join(data_dir, "ths")
             file_path = os.path.join(ths_dir, f"ths_market_overview_{trading_date}.csv")
             
-            if os.path.exists(file_path):
-                # 获取今天16点的时间戳
-                today = datetime.now().date()
-                cutoff_time = datetime.combine(today, datetime.min.time().replace(hour=16))
-                cutoff_timestamp = cutoff_time.timestamp()
-                
-                # 检查文件修改时间
-                file_mtime = os.path.getmtime(file_path)
-                if file_mtime >= cutoff_timestamp:
-                    logger.info(f"行情数据文件已存在且在16点后生成，跳过更新: {file_path}")
-                    return
-                else:
-                    logger.info(f"行情数据文件存在但在16点前生成，将重新更新: {file_path}")
+            if check_file_exists_after_time(file_path, cutoff_hour=16):
+                logger.info(f"行情数据文件已存在且在16点后生成，跳过更新: {file_path}")
+                return
+            elif os.path.exists(file_path):
+                logger.info(f"行情数据文件存在但在16点前生成，将重新更新: {file_path}")
             
             # 获取行情数据（非北交所）
             df = execute_with_retry(WencaiUtils.get_market_overview_data, trade_date=trading_date, loop=True)

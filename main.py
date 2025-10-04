@@ -11,6 +11,7 @@ from log_setup import get_logger
 from trading_calendar import TradingCalendar
 from notification import DingDingRobot
 from merge import merge
+from utils import check_file_exists_after_time
 
 
 # 配置日志
@@ -24,45 +25,33 @@ stock_pool = StockPool()
 # 重试配置
 MAX_RETRIES = 3
 RETRY_INTERVAL = 0.015 * 60  # 15分钟，单位：秒
-
+OUTPUT_BASE_DIR = "./output"
 
 
 def check_result_files_exist(trading_date: str) -> bool:
     """
-    检查结果文件是否已存在且在15点后生成
+    检查结果文件是否已存在且在16点后生成
     
     参数:
         trading_date: 交易日期，格式YYYYMMDD
     
     返回:
-        bool: 如果核心文件都已存在且在15点后生成返回True，否则返回False
+        bool: 如果核心文件都已存在且在16点后生成返回True，否则返回False
     """
-    base_path = "./data/csv"
+    base_path = f"{OUTPUT_BASE_DIR}/{trading_date}"
     
     # 需要检查的关键文件
     required_files = [
-        f"merge_first_stocks_{trading_date}.csv",
-        f"merge_core_stocks_{trading_date}.csv"
+        "first_stocks.csv",
+        "core_stocks.csv"
     ]
     
-    # 获取今天15点的时间戳
-    today = datetime.now().date()
-    cutoff_time = datetime.combine(today, datetime.min.time().replace(hour=15))
-    cutoff_timestamp = cutoff_time.timestamp()
-    
+    # 检查每个文件是否存在且在16点后生成
     for filename in required_files:
         file_path = os.path.join(base_path, filename)
-        if not os.path.exists(file_path):
-            logger.info(f"文件不存在: {file_path}")
+        if not check_file_exists_after_time(file_path, cutoff_hour=16):
             return False
-            
-        # 检查文件修改时间
-        file_mtime = os.path.getmtime(file_path)
-        if file_mtime < cutoff_timestamp:
-            logger.info(f"文件存在但在15点前生成，视为无效: {file_path}")
-            return False
-            
-        logger.info(f"文件已存在且在15点后生成: {file_path}")    
+    
     return True
 
 
@@ -79,43 +68,68 @@ def main():
             
             # 获取交易日期
             trading_date = trading_calendar.get_default_trade_date()
-            # today = datetime.now().strftime('%Y%m%d')
-            # if trading_date != today:
-            #     logger.warning(f"今天 {today} 不是交易日，跳过执行")
-            #     return
+            today = datetime.now().strftime('%Y%m%d')
+            if trading_date != today:
+                logger.warning(f"今天 {today} 不是交易日，跳过执行")
+                return
 
-            # if check_result_files_exist(trading_date):
-            #     logger.warning(f"交易日 {trading_date} 的关键结果文件已存在，跳过执行")
-            #     return
+            if check_result_files_exist(trading_date):
+                logger.warning(f"交易日 {trading_date} 的关键结果文件已存在，跳过执行")
+                return
 
             logger.info("=" * 50)
             logger.info(f"开始执行主流程，当前交易日期: {trading_date}")
             logger.info("=" * 50)
 
             # 1. 更新韭研公社每日数据
-            logger.info("开始更新韭研公社每日数据")
-            JygsUtils.update_daily_data(trading_date=trading_date)
-            logger.info("韭研公社每日数据更新完成")
+            try:
+                logger.info("开始更新韭研公社每日数据")
+                JygsUtils.update_daily_data(trading_date=trading_date)
+                logger.info("韭研公社每日数据更新完成")
+            except Exception as e:
+                logger.error(f"更新韭研公社每日数据失败: {e}")
+                dingding_robot.send_message(f"更新韭研公社每日数据失败: {e}", 'robot3')
+                raise
 
             # 2. 更新同花顺每日数据
-            logger.info("开始更新同花顺行情数据")
-            WencaiUtils.update_daily_market_overview_data()
-            logger.info("同花顺行情数据更新完成")
+            try:
+                logger.info("开始更新同花顺行情数据")
+                WencaiUtils.update_daily_market_overview_data()
+                logger.info("同花顺行情数据更新完成")
+            except Exception as e:
+                logger.error(f"更新同花顺行情数据失败: {e}")
+                dingding_robot.send_message(f"更新同花顺行情数据失败: {e}", 'robot3')
+                raise
             
             # 3. 更新涨停数据  
-            logger.info("开始更新同花顺涨停数据")
-            WencaiUtils.update_daily_zt_data()
-            logger.info("同花顺涨停数据更新完成")
+            try:
+                logger.info("开始更新同花顺涨停数据")
+                WencaiUtils.update_daily_zt_data()
+                logger.info("同花顺涨停数据更新完成")
+            except Exception as e:
+                logger.error(f"更新同花顺涨停数据失败: {e}")
+                dingding_robot.send_message(f"更新同花顺涨停数据失败: {e}", 'robot3')
+                raise
 
             # 4. 更新股票池数据
-            logger.info("开始更新股票池数据")
-            stock_pool.update_stock_pool_data()
-            logger.info("股票池数据更新完成")
+            try:
+                logger.info("开始更新股票池数据")
+                stock_pool.update_stock_pool_data()
+                logger.info("股票池数据更新完成")
+            except Exception as e:
+                logger.error(f"更新股票池数据失败: {e}")
+                dingding_robot.send_message(f"更新股票池数据失败: {e}", 'robot3')
+                raise
 
             # 5. 合并数据
-            logger.info("开始合并数据")
-            merge()
-            logger.info("数据合并完成")
+            try:
+                logger.info("开始合并数据")
+                merge()
+                logger.info("数据合并完成")
+            except Exception as e:
+                logger.error(f"合并数据失败: {e}")
+                dingding_robot.send_message(f"合并数据失败: {e}", 'robot3')
+                raise
             
             # 执行完成，发送成功通知
             end_time = datetime.now()

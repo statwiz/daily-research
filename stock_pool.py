@@ -42,6 +42,15 @@ class StockPoolConfig:
     # 查询等待时间
     QUERY_SLEEP_SECONDS = 3
     MAIN_RETRY_SLEEP_SECONDS = 10
+    
+    # 股票池配置：(筛选条件, 描述)
+    CORE_STOCK_CONFIGS = [
+        (None, "全量股票池数据"),
+        ('30', "筛选后股票池数据: 自由流通市值>30亿"),  
+        ('60', "筛选后股票池数据: 自由流通市值>60亿"),
+        ('100', "筛选后股票池数据: 自由流通市值>100亿"),
+        ('200', "筛选后股票池数据: 自由流通市值>200亿"),
+    ]
 
 
 # 全局对象
@@ -55,26 +64,60 @@ class StockPool:
     
     def __init__(self):
         """初始化股票池对象"""
-        self.trading_calendar = trading_calendar
-        self.dingding_robot = dingding_robot
-        self.logger = logger
 
 
-    def read_stock_pool_data(self, date_str: str = None,prefix: str = 'core_stocks') -> pd.DataFrame:
-        """读取股票池数据"""
+    @staticmethod
+    def _validate_dataframe(df: pd.DataFrame, operation_name: str) -> bool:
+        """验证DataFrame是否有效"""
+        if df is None or df.empty:
+            logger.warning(f"{operation_name}返回空数据")
+            return False
+        return True
+    
+    @staticmethod
+    def _create_directories(date_str: str):
+        """创建必要的目录结构"""
+        os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/{date_str}", exist_ok=True)
+        os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}/stock_pool/{date_str}", exist_ok=True)
+        
+    @staticmethod
+    def _save_file_pair(df: pd.DataFrame, file_prefix: str, date_str: str) -> dict:
+        """保存CSV和TXT文件对"""
+        paths = {}
+        
+        # 保存CSV文件
+        csv_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/{date_str}/{file_prefix}.csv"
+        df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+        paths['csv'] = csv_path
+        logger.info(f"CSV保存完成: {csv_path}")
+        
+        # 保存TXT文件
+        stock_codes = df['code'].astype(str).str.zfill(6).tolist()
+        txt_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}/stock_pool/{date_str}/{file_prefix}.txt"
+        with open(txt_path, 'w', encoding='utf-8') as f:
+            for code in stock_codes:
+                f.write(f"{code}\n")
+        paths['txt'] = txt_path
+        logger.info(f"TXT保存完成: {txt_path}")
+        
+        return paths
+        
+    def read_stock_pool_data(self, date_str: str = None, prefix: str = 'core_stocks') -> pd.DataFrame:
         if date_str is None:
             date_str = trading_calendar.get_default_trade_date()
-        csv_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/{prefix}_{date_str}.csv"
+        csv_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/{date_str}/{prefix}.csv"
         return pd.read_csv(csv_path, dtype={'code': str, 'market_code': str})
         
-    def save_stock_pool_data(self, df: pd.DataFrame, date_str: str = None,prefix: str = 'core_stocks', allow_zj: bool = True,
-                            market_value_threshold: float = 100) -> dict:
+    def save_stock_pool_data(self, df: pd.DataFrame, date_str: str = None, prefix: str = 'core_stocks', 
+                            allow_zj: bool = True, market_value_threshold: float = 100) -> dict:
         """
         保存股票池数据到CSV和TXT文件
         
         Args:
             df: 要保存的DataFrame
             date_str: 日期字符串，如果为None则使用当前日期
+            prefix: 文件名前缀
+            allow_zj: 是否保存中军版
             market_value_threshold: 市值筛选阈值（亿元）
         
         Returns:
@@ -83,63 +126,47 @@ class StockPool:
         if date_str is None:
             date_str = trading_calendar.get_default_trade_date()
         
-        self.logger.info(f"开始保存股票池数据, 数据量: {len(df)}")
-        saved_paths = {}
+        logger.info(f"开始保存股票池数据, 数据量: {len(df)}")
         
-        # 创建所需的目录结构
-        os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool", exist_ok=True)
-        os.makedirs(f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}/stock_pool", exist_ok=True)
-        
-        if df.empty:
-            self.logger.warning("没有找到数据，跳过保存")
-            return saved_paths
+        # 验证数据
+        if not StockPool._validate_dataframe(df, "保存股票池数据"):
+            return {}
         
         # 检查必要的列
         if 'code' not in df.columns:
             raise ValueError("DataFrame中缺少'code'列")
         
-        # 保存全量数据到CSV
-        csv_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/{prefix}_{date_str}.csv"
-        df.to_csv(csv_path, index=False, encoding='utf-8-sig')
-        saved_paths['main_csv'] = csv_path
-        self.logger.info(f"股票池全量CSV保存完成, 路径: {csv_path}")
+        # 创建目录
+        StockPool._create_directories(date_str)
         
-        # 保存全量代码到TXT
-        stock_codes = df['code'].astype(str).str.zfill(6).tolist()
-        txt_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}/stock_pool/{prefix}_{date_str}.txt"
-        with open(txt_path, 'w', encoding='utf-8') as f:
-            for code in stock_codes:
-                f.write(f"{code}\n")
-        saved_paths['main_txt'] = txt_path
-        self.logger.info(f"股票池全量版代码保存完成, 路径: {txt_path}")
+        saved_paths = {}
         
-        # 如果有市值列，保存中军版
+        # 保存全量数据
+        main_paths = StockPool._save_file_pair(df, prefix, date_str)
+        saved_paths.update({
+            'main_csv': main_paths['csv'],
+            'main_txt': main_paths['txt']
+        })
+        
+        # 保存中军版（如果需要）
         if allow_zj and '市值Z' in df.columns:
             threshold_value = market_value_threshold * 1e8
             filtered_df = df[df['市值Z'] > threshold_value]
-            self.logger.info(f"筛选出大于{market_value_threshold}亿自由流通市值的股票数量: {len(filtered_df)}")
+            logger.info(f"筛选出大于{market_value_threshold}亿自由流通市值的股票数量: {len(filtered_df)}")
             
             if len(filtered_df) > 0:
-                # 保存中军版CSV
-                filtered_csv_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/{prefix}_zj_{date_str}.csv"
-                filtered_df.to_csv(filtered_csv_path, index=False, encoding='utf-8-sig')
-                saved_paths['filtered_csv'] = filtered_csv_path
-                self.logger.info(f"股票池中军版CSV保存完成, 路径: {filtered_csv_path}")
-                
-                # 保存中军版代码到TXT
-                filtered_stock_codes = filtered_df['code'].astype(str).str.zfill(6).tolist()
-                filtered_txt_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.TXT_SUBDIR}/stock_pool/{prefix}_zj_{date_str}.txt"
-                with open(filtered_txt_path, 'w', encoding='utf-8') as f:
-                    for code in filtered_stock_codes:
-                        f.write(f"{code}\n")
-                saved_paths['filtered_txt'] = filtered_txt_path
-                self.logger.info(f"股票池中军版代码保存完成, 路径: {filtered_txt_path}")
+                filtered_paths = StockPool._save_file_pair(filtered_df, f"{prefix}_zj", date_str)
+                saved_paths.update({
+                    'filtered_csv': filtered_paths['csv'],
+                    'filtered_txt': filtered_paths['txt']
+                })
             else:
-                self.logger.warning(f"没有找到大于{market_value_threshold}亿自由流通市值的股票，跳过中军版数据保存")
+                logger.warning(f"没有找到大于{market_value_threshold}亿自由流通市值的股票，跳过中军版数据保存")
         
         return saved_paths
 
-    def calc_importance(self, df: pd.DataFrame, 
+    @staticmethod
+    def calc_importance(df: pd.DataFrame, 
                        alpha: float = None, 
                        beta: float = None) -> pd.DataFrame:
         """
@@ -165,7 +192,7 @@ class StockPool:
         if beta is None:
             beta = StockPoolConfig.IMPORTANCE_BETA
         
-        self.logger.info(f"开始计算股票重要度, 数据量: {len(df)}, alpha: {alpha}, beta: {beta}")
+        logger.info(f"开始计算股票重要度, 数据量: {len(df)}, alpha: {alpha}, beta: {beta}")
         start_time = time.time()
         
         def aggregate_importance(sub_df):
@@ -194,7 +221,7 @@ class StockPool:
         grouped_df.reset_index(drop=True, inplace=True)
         
         processing_time = time.time() - start_time
-        self.logger.info(f"重要度计算完成, 耗时: {processing_time:.2f}秒, 结果数量: {len(grouped_df)}")
+        logger.info(f"重要度计算完成, 耗时: {processing_time:.2f}秒, 结果数量: {len(grouped_df)}")
         
         return grouped_df[["交易日期", "股票简称", "市值Z", "market_code", "code", "区间信息", "重要度"]]
 
@@ -212,23 +239,23 @@ class StockPool:
             all_df = []
             # 使用配置类中的区间设置
             for days, rank in StockPoolConfig.INTERVAL_CONFIGS:
-                self.logger.info(f'========== selected: {selected}  {days}-{rank} ===========')
+                logger.info(f'========== selected: {selected}  {days}-{rank} ===========')
                 df = execute_with_retry(WencaiUtils.get_top_stocks, 
                                        max_retry_count=StockPoolConfig.MAX_RETRY_COUNT,
                                        retry_base_delay=StockPoolConfig.RETRY_BASE_DELAY,
                                        days=days, rank=rank, use_filters=selected)
-                if df is None or df.empty:
+                if not StockPool._validate_dataframe(df, f'{(days,rank)}获取数据'):
                     raise Exception(f'{(days,rank)}获取数据失败')
                 all_df.append(df)
                 time.sleep(StockPoolConfig.QUERY_SLEEP_SECONDS)
             
             df_all = pd.concat(all_df)
-            df = self.calc_importance(df_all, 
+            df = StockPool.calc_importance(df_all, 
                                alpha=StockPoolConfig.IMPORTANCE_ALPHA, 
                                beta=StockPoolConfig.IMPORTANCE_BETA)
             return df
         except Exception as e:
-            self.logger.error(f"获取股票池失败: {e}")
+            logger.error(f"获取股票池失败: {e}")
             return None
 
 
@@ -242,28 +269,20 @@ class StockPool:
         try:
             data_list = []
             
-            # 股票池配置：(筛选条件, 描述)
-            pool_configs = [
-                (None, "全量股票池数据"),
-                ('30', "筛选后股票池数据: 自由流通市值>30亿"),  
-                ('60', "筛选后股票池数据: 自由流通市值>60亿"),
-                ('100', "筛选后股票池数据: 自由流通市值>100亿"),
-                ('200', "筛选后股票池数据: 自由流通市值>200亿"),
-            ]
-            
-            for i, (selected, description) in enumerate(pool_configs, 1):
+            for i, (selected, description) in enumerate(StockPoolConfig.CORE_STOCK_CONFIGS, 1):
                 step_name = "步骤1" if selected is None else f"步骤2.{i-1}"
-                self.logger.info(f" ------------ {step_name}: 获取{description} ------------")
+                logger.info(f" ------------ {step_name}: 获取{description} ------------")
                 
                 data = self.get_muti_top_stocks(selected=selected)
-                if data is None or data.empty:
-                    self.logger.warning(f"{description}获取失败，跳过本次尝试")
+                if not StockPool._validate_dataframe(data, description):
                     return None  # 任何一个获取失败就返回None
                 
-                self.logger.info(f'{description}获取成功, 数据量: {data.shape}')
+                logger.info(f'{description}获取成功, 数据量: {data.shape}')
                 data_list.append(data)
+                
             if len(data_list) == 0:
                 return None
+                
             combined_df = pd.concat(data_list, ignore_index=True)
             
             # 按股票分组，保留重要度最高的记录
@@ -275,7 +294,7 @@ class StockPool:
             df['重要度'] = df['重要度'].round(2)
             return df
         except Exception as e:
-            self.logger.error(f"获取核心股票池数据失败: {e}")
+            logger.error(f"获取核心股票池数据失败: {e}")
             return None
 
     def get_first_breakout_stocks(self):
@@ -283,59 +302,57 @@ class StockPool:
         获取首板股票池数据
         """
         try:
-            self.logger.info("开始获取所有的首板股票池数据")
+            logger.info("开始获取所有的首板股票池数据")
             df = execute_with_retry(WencaiUtils.get_first_breakout_stocks, 
                                    k=11,
                                    use_filters=False)
-            if df is None or df.empty:
+            if not StockPool._validate_dataframe(df, "获取所有首板股票池数据"):
                 raise Exception("获取所有首板股票池数据失败")
-            self.logger.info(f"所有首板股票池数据量: {len(df)}")
-            # 保存所有首板股票池数据
-            # self.save_stock_pool_codes(df, trade_date)
-            self.logger.info("开始获取自由流通市值大于100亿的首板股票池数据")
+            logger.info(f"所有首板股票池数据量: {len(df)}")
+            
+            logger.info("开始获取自由流通市值大于100亿的首板股票池数据")
             df_zj = execute_with_retry(WencaiUtils.get_first_breakout_stocks, 
                                    k=11,
                                    use_filters=True)
-            if df_zj is None or df_zj.empty:
+            if not StockPool._validate_dataframe(df_zj, "获取自由流通市值大于100亿的首板股票池数据"):
                 raise Exception("获取自由流通市值大于100亿的首板股票池数据失败")
-            self.logger.info(f"自由流通市值大于100亿的首板股票池数据量: {len(df_zj)}")
+            logger.info(f"自由流通市值大于100亿的首板股票池数据量: {len(df_zj)}")
+            
             df = pd.concat([df, df_zj])
             # 去重
             df = df.drop_duplicates(subset=['股票简称'])
             output_columns = ['交易日期', '股票简称', '市值Z', 'market_code', 'code']
             return df[output_columns]
         except Exception as e:
-            self.logger.error(f"获取首板股票池数据失败: {e}")
+            logger.error(f"获取首板股票池数据失败: {e}")
             return None
 
     def update_stock_pool_data(self):
-
         try:
-            self.logger.info("开始执行股票池数据获取任务...")
+            logger.info("开始执行股票池数据获取任务...")
             trade_date = trading_calendar.get_default_trade_date()
+            
             # 步骤1: 获取核心股票池数据
             core_df = self.get_core_stocks_data()
-            if core_df is None or core_df.empty:
-                self.logger.error("核心股票池数据收集失败")
+            if not StockPool._validate_dataframe(core_df, "核心股票池数据收集"):
                 raise Exception("核心股票池数据收集失败")
-            self.logger.info(f"核心股票池数据获取成功, 数据量: {core_df.shape}")
+            logger.info(f"核心股票池数据获取成功, 数据量: {core_df.shape}")
 
             # 步骤2: 获取并保存首板股票池数据
-            self.logger.info("------------ 步骤2: 获取首板股票池数据------------")
+            logger.info("------------ 步骤2: 获取首板股票池数据------------")
             first_stocks_df = self.get_first_breakout_stocks()
-            if first_stocks_df is None or first_stocks_df.empty:
-                self.logger.error("首板股票池数据收集失败")
+            if not StockPool._validate_dataframe(first_stocks_df, "首板股票池数据收集"):
                 raise Exception("首板股票池数据收集失败")
-            self.logger.info(f"首板股票池数据获取成功, 数据量: {first_stocks_df.shape}")
+            logger.info(f"首板股票池数据获取成功, 数据量: {first_stocks_df.shape}")
 
             # 步骤3: 保存核心股票池数据和首板股票池数据
             logger.info("------------ 步骤3: 保存核心股票池数据和首板股票池数据------------")
             self.save_stock_pool_data(core_df, trade_date, prefix='core_stocks')
             self.save_stock_pool_data(first_stocks_df, trade_date, prefix='first_stocks')
-            self.logger.info("核心股票池数据和首板股票池数据保存成功")
+            logger.info("核心股票池数据和首板股票池数据保存成功")
 
         except Exception as e:
-            self.logger.error(f"股票池数据获取任务失败: {e}")
+            logger.error(f"股票池数据获取任务失败: {e}")
             raise
 
 
