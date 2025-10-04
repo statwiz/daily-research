@@ -76,7 +76,7 @@ def _load_previous_data(date_str: str) -> Optional[pd.DataFrame]:
 def _save_stock_changes(current_df: pd.DataFrame, previous_df: pd.DataFrame, 
                        new_codes: set, removed_codes: set, date_str: str):
     """保存新增和移除的股票数据"""
-    save_dir = f"output/{date_str}"
+    save_dir = f"{OUTPUT_BASE_DIR}/{date_str}"
     os.makedirs(save_dir, exist_ok=True)
     
     # 保存新增股票
@@ -462,7 +462,7 @@ def generate_report(merged_first_board_data: pd.DataFrame,
             return f"📊 今日新兴热点分析\n🔍 发现{len(emerging_hotspots)}个新热点，但无相关首板股票数据"
         
         # 保存新兴热点数据
-        save_dir = f"output/{date_str}"
+        save_dir = f"{OUTPUT_BASE_DIR}/{date_str}"
         os.makedirs(save_dir, exist_ok=True)
         emerging_hotspots_file = f"{save_dir}/emerging_hotspots.csv"
         emerging_hotspots_df.to_csv(emerging_hotspots_file, index=False, encoding='utf-8-sig')

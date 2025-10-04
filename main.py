@@ -24,7 +24,7 @@ stock_pool = StockPool()
 
 # 重试配置
 MAX_RETRIES = 3
-RETRY_INTERVAL = 0.015 * 60  # 15分钟，单位：秒
+RETRY_INTERVAL = 15 * 60  # 15分钟，单位：秒
 OUTPUT_BASE_DIR = "./output"
 
 

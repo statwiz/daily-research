@@ -9,7 +9,7 @@ from log_setup import get_logger
 from trading_calendar import TradingCalendar
 from notification import DingDingRobot
 from wencai import WencaiUtils
-from utils import execute_with_retry
+from utils import execute_with_retry, check_file_exists_after_time
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -331,6 +331,22 @@ class StockPool:
         try:
             logger.info("开始执行股票池数据获取任务...")
             trade_date = trading_calendar.get_default_trade_date()
+            
+            # 检查目标文件是否已存在且在16点后生成
+            base_path = f"{StockPoolConfig.DATA_SAVE_DIR}/{StockPoolConfig.CSV_SUBDIR}/stock_pool/{trade_date}"
+            required_files = ["core_stocks.csv", "first_stocks_zj.csv"]
+            
+            # 检查每个文件是否存在且在16点后生成
+            all_files_exist = True
+            for filename in required_files:
+                file_path = os.path.join(base_path, filename)
+                if not check_file_exists_after_time(file_path, cutoff_hour=16):
+                    all_files_exist = False
+                    break
+            
+            if all_files_exist:
+                logger.info(f"目标文件已存在且在16点后生成，跳过数据获取任务: {required_files}")
+                return
             
             # 步骤1: 获取核心股票池数据
             core_df = self.get_core_stocks_data()
