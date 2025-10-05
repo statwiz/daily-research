@@ -278,7 +278,115 @@ def plot_hotspot_rotation(df):
     st.plotly_chart(fig, use_container_width=True)
     
 
-def display_csv_data(file_path, title, description=""):
+def plot_industry_distribution(df, title="行业分布"):
+    """绘制行业股票数量分布柱状图"""
+    if df is None or df.empty:
+        st.warning("没有可用的数据")
+        return
+    
+    if '行业' not in df.columns:
+        st.warning("数据中缺少行业列")
+        return
+    
+    # 统计每个行业的股票数量
+    industry_counts = df['行业'].value_counts()
+    
+    # 按数量从小到大排序
+    industry_counts = industry_counts.sort_values(ascending=True)
+    
+    if len(industry_counts) == 0:
+        st.warning("没有行业数据")
+        return
+    
+    # 创建柱状图
+    fig = go.Figure(data=[
+        go.Bar(
+            x=industry_counts.index,
+            y=industry_counts.values,
+            text=industry_counts.values,
+            textposition='auto',
+            marker=dict(
+                color=industry_counts.values,
+                colorscale='viridis',
+                showscale=True,
+                colorbar=dict(title="股票数量")
+            )
+        )
+    ])
+    
+    fig.update_layout(
+        title=title,
+        xaxis_title="行业",
+        yaxis_title="股票数量",
+        height=500,
+        showlegend=False,
+        xaxis_tickangle=-45
+    )
+    
+    # 确保x轴按照我们排序的顺序显示
+    fig.update_xaxes(categoryorder='array', categoryarray=industry_counts.index.tolist())
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_hotspot_distribution(df, title="热点分布"):
+    """绘制热点股票数量分布柱状图"""
+    if df is None or df.empty:
+        st.warning("没有可用的数据")
+        return
+    
+    if '热点' not in df.columns:
+        st.warning("数据中缺少热点列")
+        return
+    
+    # 应用相似热点合并逻辑
+    df_unified = unify_similar_hotspots(df)
+    
+    # 过滤掉不需要的热点
+    filtered_df = df_unified[
+        ~df_unified['热点'].isin(['ST板块', '其他', '公告'])
+    ]
+    
+    # 统计每个热点的股票数量
+    hotspot_counts = filtered_df['热点'].value_counts()
+    
+    # 按数量从小到大排序
+    hotspot_counts = hotspot_counts.sort_values(ascending=True)
+    
+    if len(hotspot_counts) == 0:
+        st.warning("没有热点数据")
+        return
+    
+    # 创建柱状图
+    fig = go.Figure(data=[
+        go.Bar(
+            x=hotspot_counts.index,
+            y=hotspot_counts.values,
+            text=hotspot_counts.values,
+            textposition='auto',
+            marker=dict(
+                color=hotspot_counts.values,
+                colorscale='plasma',
+                showscale=True,
+                colorbar=dict(title="股票数量")
+            )
+        )
+    ])
+    
+    fig.update_layout(
+        title=title,
+        xaxis_title="热点",
+        yaxis_title="股票数量",
+        height=500,
+        showlegend=False,
+        xaxis_tickangle=-45
+    )
+    
+    # 确保x轴按照我们排序的顺序显示
+    fig.update_xaxes(categoryorder='array', categoryarray=hotspot_counts.index.tolist())
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def display_csv_data(file_path, title, description="", show_industry_chart=False, show_hotspot_chart=False):
     """展示CSV文件数据"""
     if not os.path.exists(file_path):
         st.warning(f"{title}数据文件不存在")
@@ -300,11 +408,17 @@ def display_csv_data(file_path, title, description=""):
             if '热点' in df.columns:
                 unique_hotspots = df['热点'].nunique()
                 st.metric("热点数量", unique_hotspots)
+            elif '行业' in df.columns:
+                unique_industries = df['行业'].nunique()
+                st.metric("行业数量", unique_industries)
             else:
                 st.metric("列数", len(df.columns))
         with col3:
             if '涨跌幅' in df.columns:
                 avg_change = df['涨跌幅'].mean()
+                st.metric("平均涨跌幅", f"{avg_change:.2f}%")
+            elif '最新涨跌幅' in df.columns:
+                avg_change = df['最新涨跌幅'].mean()
                 st.metric("平均涨跌幅", f"{avg_change:.2f}%")
             elif '股票简称' in df.columns:
                 st.metric("股票数量", len(df))
@@ -316,47 +430,16 @@ def display_csv_data(file_path, title, description=""):
             height=400
         )
         
-        # 如果有热点列，显示热点分布
-        if '热点' in df.columns and len(df) > 0:
+        # 如果需要显示行业分布图
+        if show_industry_chart and '行业' in df.columns and len(df) > 0:
+            st.markdown("**行业分布：**")
+            plot_industry_distribution(df, f"{title}行业分布")
+        
+        # 如果需要显示热点分布图
+        if show_hotspot_chart and '热点' in df.columns and len(df) > 0:
             st.markdown("**热点分布：**")
-            
-            # 应用相似热点合并逻辑
-            df_unified = unify_similar_hotspots(df)
-            
-            # 过滤掉不需要的热点
-            filtered_hotspots = df_unified[
-                ~df_unified['热点'].isin(['其他', '公告', 'ST板块'])
-            ]['热点'].value_counts()
-            
-            # 按数量从小到大排序（升序）
-            filtered_hotspots = filtered_hotspots.sort_values(ascending=True)
-            
-            if len(filtered_hotspots) > 0:
-                # 使用 plotly 创建柱状图以确保正确排序
-                fig = go.Figure(data=[
-                    go.Bar(
-                        x=filtered_hotspots.index,
-                        y=filtered_hotspots.values,
-                        text=filtered_hotspots.values,
-                        textposition='auto',
-                    )
-                ])
-                
-                fig.update_layout(
-                    title="热点股票数量分布",
-                    xaxis_title="热点",
-                    yaxis_title="股票数量",
-                    height=400,
-                    showlegend=False
-                )
-                
-                # 确保x轴按照我们排序的顺序显示
-                fig.update_xaxes(categoryorder='array', categoryarray=filtered_hotspots.index.tolist())
-                
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("过滤后没有可显示的热点数据")
-            
+            plot_hotspot_distribution(df, f"{title}热点分布")
+        
     except Exception as e:
         st.error(f"加载{title}数据失败: {e}")
 
@@ -429,32 +512,48 @@ def show_stock_pool_data():
         "emerging_hotspots.csv": {
             "title": "新兴热点",
             "description": "新出现的市场热点和相关股票"
+        },
+        "hk_stocks.csv": {
+            "title": "香港股票池",
+            "description": "香港市场精选股票，按行业分布展示"
+        },
+        "us_stocks.csv": {
+            "title": "美国股票池",
+            "description": "美国市场精选股票，按行业分布展示"
         }
     }
     
     
     # 创建标签页
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["高位股票池", "低位股票池", "新增股票", "移除股票", "新兴热点"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["高位股票池", "低位股票池", "新增股票", "移除股票", "新兴热点", "香港股票池", "美国股票池"])
     
     with tab1:
         file_path = os.path.join(BASE_PATH, "core_stocks.csv")
-        display_csv_data(file_path, "高位股票池", files_config["core_stocks.csv"]["description"])
+        display_csv_data(file_path, "高位股票池", files_config["core_stocks.csv"]["description"], show_hotspot_chart=True)
     
     with tab2:
         file_path = os.path.join(BASE_PATH, "first_stocks.csv")
-        display_csv_data(file_path, "低位股票池", files_config["first_stocks.csv"]["description"])
+        display_csv_data(file_path, "低位股票池", files_config["first_stocks.csv"]["description"], show_hotspot_chart=True)
     
     with tab3:
         file_path = os.path.join(BASE_PATH, "add.csv")
-        display_csv_data(file_path, "新增股票", files_config["add.csv"]["description"])
+        display_csv_data(file_path, "新增股票", files_config["add.csv"]["description"], show_hotspot_chart=True)
     
     with tab4:
         file_path = os.path.join(BASE_PATH, "remove.csv") 
-        display_csv_data(file_path, "移除股票", files_config["remove.csv"]["description"])
+        display_csv_data(file_path, "移除股票", files_config["remove.csv"]["description"], show_hotspot_chart=True)
     
     with tab5:
         file_path = os.path.join(BASE_PATH, "emerging_hotspots.csv")
-        display_csv_data(file_path, "新兴热点", files_config["emerging_hotspots.csv"]["description"])
+        display_csv_data(file_path, "新兴热点", files_config["emerging_hotspots.csv"]["description"], show_hotspot_chart=True)
+    
+    with tab6:
+        file_path = "./output/hk_stocks.csv"
+        display_csv_data(file_path, "香港股票池", files_config["hk_stocks.csv"]["description"], show_industry_chart=True)
+    
+    with tab7:
+        file_path = "./output/us_stocks.csv"
+        display_csv_data(file_path, "美国股票池", files_config["us_stocks.csv"]["description"], show_industry_chart=True)
 
 if __name__ == "__main__":
     main()

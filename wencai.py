@@ -88,6 +88,32 @@ class WencaiUtils:
         return cleaned
  
     @staticmethod
+    def remove_usstock_prefix(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        删除 DataFrame 列名中以 '美股@' 开头的前缀。
+        返回修改后的 DataFrame（不会修改原 df）。
+        """
+        column_mapping = {}
+        for col in df.columns:
+            if col.startswith("美股@"):
+                new_name = re.sub(r"^美股@", "", col)
+                column_mapping[col] = new_name
+        return df.rename(columns=column_mapping)
+
+    @staticmethod
+    def remove_hkstock_prefix(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        删除 DataFrame 列名中以 '港股@' 开头的前缀。
+        返回修改后的 DataFrame（不会修改原 df）。
+        """
+        column_mapping = {}
+        for col in df.columns:
+            if col.startswith("港股@"):
+                new_name = re.sub(r"^港股@", "", col)
+                column_mapping[col] = new_name
+        return df.rename(columns=column_mapping)
+
+    @staticmethod
     def get_top_stocks(days: int = 5, rank: int = 5, use_filters: str = None) -> pd.DataFrame:
         """
         获取指定天数内涨幅排名前N的股票数据
@@ -205,7 +231,9 @@ class WencaiUtils:
                 if col in df.columns:
                     df[col] = df[col].astype(float).astype(int)
             output_columns = ['交易日期','股票简称','涨跌幅','市值Z','market_code','code']
-            return df[output_columns]
+            df = df[output_columns]
+            df = df.sort_values('市值Z', ascending=False)
+            return df
         except Exception as e:
             logger.error(f"获取首次突破股票数据失败: {e}")
             raise
@@ -777,11 +805,96 @@ class WencaiUtils:
         """读取最新涨停数据"""
         return pd.read_csv(os.path.join(DEFAULT_DATA_DIR, "ths", "ths_zt.csv"), dtype={'code': str, 'market_code': str, '交易日期': str})
     
+    @staticmethod
+    def get_us_top_stocks(days: int = 5, rank: int = 50) -> pd.DataFrame:
+        """获取美股前N名股票数据"""
+        try:
+            logger.info(f"开始获取美股前{rank}名股票数据, 最近{days}个交易日")
+            query_text = f'最近{days}个交易日区间涨幅从大到小排名前{rank},行业,股票简称不包含做多,流通市值大于100亿美元,公司简介'
+            logger.info(f"查询语句: {query_text}")
+            raw_df = pywencai.get(query=query_text, query_type='usstock')
+            logger.info(f"原始数据获取成功, 数据量: {len(raw_df)}")
+            df = raw_df.copy()
+            df['交易日期'] = WencaiUtils.extract_trade_date(df)
+            df = WencaiUtils.remove_date_suffix(df)
+            df = WencaiUtils.remove_usstock_prefix(df)
+            column_mapping = {
+                '区间涨跌幅:前复权': '区间涨幅', 
+                '区间涨跌幅:前复权排名': '区间排名',
+                '同花顺全球行业三级分类': '行业',
+            }
+            df.rename(columns=column_mapping, inplace=True)
+            df = WencaiUtils.clean_dataframe(df, ['流通市值','最新涨跌幅','区间涨幅','区间排名','market_code', 'code'])
 
+            for col in ['区间涨幅', '最新涨跌幅']:
+                df[col] = df[col].astype(float).round(2)
+
+            df['区间排名'] = (df['区间排名'].astype(str)
+                                        .str.split('/')
+                                        .str[0]
+                                        .astype(int))
+            # 处理字符串列
+            for col in ['market_code', 'code', '行业']:
+                if col in df.columns:
+                    df[col] = df[col].astype(str)
+
+            df['流通市值'] = df['流通市值'].apply(lambda x: round(float(x)/1e8) if x is not None else 0)
+            df['区间长度'] = days
+            required_columns = ['交易日期', '股票简称', '最新涨跌幅', '区间涨幅', '区间排名','区间长度','流通市值','行业','公司简介', 'market_code', 'code']
+            df = df[required_columns]
+            return df
+        except Exception as e:
+            logger.error(f"获取美股前N名股票数据失败: {e}")
+            raise
+
+    @staticmethod
+    def get_hk_top_stocks(days: int = 5, rank: int = 50) -> pd.DataFrame:
+        """获取港股前N名股票数据"""
+        try:
+            logger.info(f"开始获取港股前{rank}名股票数据, 最近{days}个交易日")
+            query_text = f'最近{days}个交易日的区间涨跌幅排名前{rank}，行业，股票简称不包含做多,公司简介,流通市值大于90亿港元'
+            logger.info(f"查询语句: {query_text}")
+            raw_df = pywencai.get(query=query_text, query_type='hkstock')
+            logger.info(f"原始数据获取成功, 数据量: {len(raw_df)}")
+            df = raw_df.copy()
+            df['交易日期'] = WencaiUtils.extract_trade_date(df)
+            df = WencaiUtils.remove_date_suffix(df)
+            df = WencaiUtils.remove_hkstock_prefix(df)
+            column_mapping = {
+                '区间涨跌幅:前复权': '区间涨幅', 
+                '区间涨跌幅:前复权排名': '区间排名',
+                '所属恒生行业(二级)': '行业',
+            }
+            df.rename(columns=column_mapping, inplace=True)
+            df = WencaiUtils.clean_dataframe(df, ['流通市值','最新涨跌幅','区间涨幅','区间排名','market_code', 'code'])
+
+            for col in ['区间涨幅', '最新涨跌幅']:
+                df[col] = df[col].astype(float).round(2)
+
+            df['区间排名'] = (df['区间排名'].astype(str)
+                                        .str.split('/')
+                                        .str[0]
+                                        .astype(int))
+            # 处理字符串列
+            for col in ['market_code', 'code', '行业']:
+                if col in df.columns:
+                    df[col] = df[col].astype(str)
+
+            df['流通市值'] = df['流通市值'].apply(lambda x: round(float(x)/1e8) if x is not None else 0)
+            df['区间长度'] = days
+            required_columns = ['交易日期', '股票简称', '最新涨跌幅', '区间涨幅', '区间排名','区间长度','流通市值','行业','公司简介', 'market_code', 'code']
+            df = df[required_columns]
+            df = df.sort_values('区间涨幅', ascending=False)
+            return df
+        except Exception as e:
+            logger.error(f"获取港股前N名股票数据失败: {e}")
+            raise
 
 
 
 
 if __name__ == "__main__":
-    WencaiUtils.update_daily_market_overview_data()
-    WencaiUtils.update_daily_zt_data()
+    # WencaiUtils.update_daily_market_overview_data()
+    # WencaiUtils.update_daily_zt_data()
+    # WencaiUtils.get_us_top_stocks()
+    print(WencaiUtils.get_hk_top_stocks())
