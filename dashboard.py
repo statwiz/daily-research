@@ -443,6 +443,135 @@ def display_csv_data(file_path, title, description="", show_industry_chart=False
     except Exception as e:
         st.error(f"加载{title}数据失败: {e}")
 
+def display_stock_info_data(file_path, title, description="", file_type="default"):
+    """展示股票信息数据（新闻、公告、研报）"""
+    if not os.path.exists(file_path):
+        st.warning(f"{title}数据文件不存在")
+        return
+    
+    try:
+        df = pd.read_csv(file_path)
+        
+        # 显示标题和描述
+        st.subheader(f"📰 {title}")
+        if description:
+            st.markdown(description)
+        
+        # 显示基本统计信息
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("总记录数", len(df))
+        with col2:
+            if 'stock_name' in df.columns:
+                unique_stocks = df['stock_name'].nunique()
+                st.metric("股票数量", unique_stocks)
+        with col3:
+            if 'info_type' in df.columns:
+                info_type_counts = df['info_type'].value_counts()
+                st.metric("信息类型", len(info_type_counts))
+        with col4:
+            if 'source' in df.columns:
+                unique_sources = df['source'].nunique()
+                st.metric("信息来源", unique_sources)
+        
+        
+        # 股票筛选器
+        if 'stock_name' in df.columns:
+            st.markdown("**股票筛选：**")
+            selected_stocks = st.multiselect(
+                "选择要查看的股票（留空显示全部）:",
+                options=sorted(df['stock_name'].unique()),
+                default=[],
+                key=f"stock_select_{file_type}"
+            )
+            
+            if selected_stocks:
+                df = df[df['stock_name'].isin(selected_stocks)]
+        
+        # 信息类型筛选器
+        if 'info_type' in df.columns:
+            selected_info_types = st.multiselect(
+                "选择信息类型（留空显示全部）:",
+                options=sorted(df['info_type'].unique()),
+                default=[],
+                key=f"type_select_{file_type}"
+            )
+            
+            if selected_info_types:
+                df = df[df['info_type'].isin(selected_info_types)]
+        
+        # 显示过滤后的统计
+        if len(df) > 0:
+            st.info(f"过滤后显示 {len(df)} 条记录")
+            
+            # 显示数据表格，优化列显示
+            display_columns = ['stock_name', 'info_type', 'publish_time', 'source', 'title']
+            if all(col in df.columns for col in display_columns):
+                display_df = df[display_columns].copy()
+                # 限制标题长度以便更好显示
+                display_df['title'] = display_df['title'].str[:100] + '...'
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    height=600
+                )
+            else:
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    height=600
+                )
+            
+            # 详细信息展开
+            st.markdown("**详细信息查看：**")
+            if len(df) > 0:
+                # 安全地处理标题显示，避免NaN值导致的错误
+                def safe_format_func(x):
+                    try:
+                        row = df.iloc[x]
+                        stock_name = str(row['stock_name']) if pd.notna(row['stock_name']) else '未知'
+                        info_type = str(row['info_type']) if pd.notna(row['info_type']) else '未知'
+                        title = str(row['title'])[:50] if pd.notna(row['title']) else '无标题'
+                        return f"{stock_name} - {info_type} - {title}..."
+                    except:
+                        return f"记录 {x}"
+                
+                selected_index = st.selectbox(
+                    "选择要查看详细信息的记录:",
+                    options=range(len(df)),
+                    format_func=safe_format_func,
+                    key=f"detail_select_{file_type}"
+                )
+                
+                if selected_index is not None:
+                    selected_row = df.iloc[selected_index]
+                    st.markdown("**详细内容：**")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**股票名称：** {selected_row['stock_name']}")
+                        st.write(f"**信息类型：** {selected_row['info_type']}")
+                        st.write(f"**发布时间：** {selected_row['publish_time']}")
+                        st.write(f"**来源：** {selected_row['source']}")
+                    
+                    with col2:
+                        if 'author' in selected_row and pd.notna(selected_row['author']):
+                            st.write(f"**作者：** {selected_row['author']}")
+                        if 'url' in selected_row and pd.notna(selected_row['url']):
+                            st.write(f"**链接：** {selected_row['url']}")
+                    
+                    st.markdown("**标题：**")
+                    st.write(selected_row['title'])
+                    
+                    if 'summary' in selected_row and pd.notna(selected_row['summary']):
+                        st.markdown("**摘要：**")
+                        st.write(selected_row['summary'])
+        else:
+            st.warning("没有符合筛选条件的数据")
+        
+    except Exception as e:
+        st.error(f"加载{title}数据失败: {e}")
+
 def main():
     """主函数"""
     st.set_page_config(
@@ -525,7 +654,7 @@ def show_stock_pool_data():
     
     
     # 创建标签页
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["高位股票池", "低位股票池", "新增股票", "移除股票", "新兴热点", "香港股票池", "美国股票池"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(["高位股票池", "低位股票池", "新增股票", "移除股票", "新兴热点", "香港股票池", "美国股票池", "高位股票信息", "低位股票信息"])
     
     with tab1:
         file_path = os.path.join(BASE_PATH, "core_stocks.csv")
@@ -554,6 +683,14 @@ def show_stock_pool_data():
     with tab7:
         file_path = "./output/us_stocks.csv"
         display_csv_data(file_path, "美国股票池", files_config["us_stocks.csv"]["description"], show_industry_chart=True)
+    
+    with tab8:
+        file_path = "./output/core_info.csv"
+        display_stock_info_data(file_path, "高位股票信息", "高位股票池相关的新闻、公告和研报信息", "core")
+    
+    with tab9:
+        file_path = "./output/first_info.csv"
+        display_stock_info_data(file_path, "低位股票信息", "低位股票池相关的新闻、公告和研报信息", "first")
 
 if __name__ == "__main__":
     main()

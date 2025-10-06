@@ -69,9 +69,9 @@ def main():
             # 获取交易日期
             trading_date = trading_calendar.get_default_trade_date()
             today = datetime.now().strftime('%Y%m%d')
-            if trading_date != today:
-                logger.warning(f"今天 {today} 不是交易日，跳过执行")
-                return
+            # if trading_date != today:
+            #     logger.warning(f"今天 {today} 不是交易日，跳过执行")
+            #     return
 
             if check_result_files_exist(trading_date):
                 logger.warning(f"交易日 {trading_date} 的关键结果文件已存在，跳过执行")

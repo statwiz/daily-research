@@ -80,9 +80,9 @@ def check_file_exists_after_time(file_path: str, cutoff_hour: int = 16) -> bool:
         file_mtime = os.path.getmtime(file_path)
         file_datetime = datetime.fromtimestamp(file_mtime)
         
-        # 获取今天指定时间点的时间戳
-        today = datetime.now().date()
-        cutoff_time = datetime.combine(today, datetime.min.time().replace(hour=cutoff_hour))
+        # 获取文件生成当天指定时间点的时间戳
+        file_date = file_datetime.date()
+        cutoff_time = datetime.combine(file_date, datetime.min.time().replace(hour=cutoff_hour))
         
         # 比较文件修改时间和截止时间
         return file_datetime >= cutoff_time
