@@ -644,7 +644,7 @@ class WencaiUtils:
             raise
 
     @staticmethod
-    def _update_latest_zt_data(new_data: pd.DataFrame, data_dir: str) -> None:
+    def _update_latest_zt_data(trading_date: str , new_data: pd.DataFrame, data_dir: str) -> None:
         """更新最新涨停数据文件"""
         try:
             # 确保ths目录存在
@@ -717,7 +717,7 @@ class WencaiUtils:
             WencaiUtils._update_zt_stocks_data(df, trading_date = trading_date, data_dir = data_dir)
 
             # 2. 更新最新同花顺涨停股票数据文件
-            WencaiUtils._update_latest_zt_data(df, data_dir = data_dir)
+            WencaiUtils._update_latest_zt_data(trading_date = trading_date, new_data = df, data_dir = data_dir)
             
             logger.info(f"完成{trading_date}同花顺涨停数据保存")
 

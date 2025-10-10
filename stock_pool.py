@@ -109,7 +109,7 @@ class StockPool:
         return pd.read_csv(csv_path, dtype={'code': str, 'market_code': str})
         
     def save_stock_pool_data(self, df: pd.DataFrame, date_str: str = None, prefix: str = 'core_stocks', 
-                            allow_zj: bool = True, market_value_threshold: float = 100) -> dict:
+                            allow_zj: bool = True, market_value_threshold: float = 50) -> dict:
         """
         保存股票池数据到CSV和TXT文件
         

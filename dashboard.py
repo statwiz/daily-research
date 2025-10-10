@@ -5,17 +5,21 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import os
-from trading_calendar import TradingCalendar
+# from trading_calendar import TradingCalendar
 
 import warnings
 warnings.filterwarnings("ignore")
 
 # 初始化交易日历
-trading_calendar = TradingCalendar()
+# trading_calendar = TradingCalendar()
 
 # 动态获取交易日期并配置基础路径
-TRADE_DATE = trading_calendar.get_default_trade_date()
-BASE_PATH = f"./output/{TRADE_DATE}/"
+# TRADE_DATE = trading_calendar.get_default_trade_date()
+OUTPUT_PATH = f"./output"
+
+# 获取output目录下最新日期,必须是文件夹且是日期格式YYYYMMDD
+latest_date = max(os.listdir(OUTPUT_PATH), key=lambda x: x if x.isdigit() else '0')
+BASE_PATH = f"./output/{latest_date}/"
 
 # 日期名称映射
 day_map = {

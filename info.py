@@ -3,6 +3,7 @@ import json
 import re
 import datetime
 import time
+import os
 import pandas as pd
 from trading_calendar import TradingCalendar
 from log_setup import get_logger
@@ -54,7 +55,7 @@ class StockInfo:
             
             ignore_keywords = {
                 "融资买入", "融资净买", "资金净流入", "成交额", "龙虎榜",
-                '两融余额', '热榜', '新高', '股东户数', '主力资金','涨停板','连板','开盘涨幅',
+                '两融余额', '热榜', '新高', '股东户数', '主力资金','涨停板','连板','开盘涨幅','午后',
             }
             
             results = response_data.get('data', {}).get('results', [])
@@ -74,12 +75,18 @@ class StockInfo:
                 if ignore_flag:
                     continue
                 
+                # 处理url字段，为缺少https前缀的url添加前缀
+                url = item.get('url', '')
+                if url and url.startswith('//'):
+                    url = 'https:' + url
+                
                 news_item = {
                     'title': title,
                     'summary': self.clean_html_tags(item.get('summary', '')),
                     'publish_source': publish_source,
                     'score': item.get('score', 0),
-                    'publish_time': item.get('publish_time', '')
+                    'publish_time': item.get('publish_time', ''),
+                    'url': url
                 }
                 result.append(news_item)
             
@@ -94,6 +101,7 @@ class StockInfo:
             )
 
             response_data = response.json()
+            # print(response_data)
             query_keyword = data['query']
             parsed_news = parse_news_response(response_data, query_keyword)
             parsed_news.sort(key=lambda x: x.get('publish_time', ''), reverse=True)
@@ -217,7 +225,7 @@ class StockInfo:
                                             view_parts.append(f"{i}.{view}({argument})")
                                         else:
                                             view_parts.append(f"{i}.{view}")
-                                view_str = ';'.join(view_parts)
+                                view_str = '\n'.join(view_parts)
                             
                             report_info = {
                                 'author_name': item.get('author_name', ''),
@@ -294,7 +302,7 @@ class StockInfo:
                     'title': title,
                     'summary': summary,
                     'author': '',
-                    'url': '',
+                    'url': item.get('url', ''),
                     'extra_info': json.dumps({
                         'score': item.get('score', 0)
                     }, ensure_ascii=False)
@@ -381,7 +389,7 @@ class StockInfo:
             pd.DataFrame: 包含新闻、公告、研报的统一DataFrame
         """
         # 设置默认参数
-        news_params = news_params or {'date_range': '2', 'size': '15'}
+        news_params = news_params or {'date_range': '2', 'size': '25'}
         announcement_params = announcement_params or {'date_range': '2', 'size': '5'}
         research_params = research_params or {'date_range': '3', 'perpage': '5'}
         
@@ -525,7 +533,7 @@ def process_stock_pool(stock_pool, output_filename, pool_name):
         return empty_df
 
 
-def main():
+def get_stock_info():
     """
     主函数，包含重试机制
     """
@@ -541,16 +549,21 @@ def main():
             logger.info("=" * 50)
 
             # 获取交易日期
-            trading_days = trading_calendar.get_default_trade_date()
-            logger.info(f"当前交易日期: {trading_days}")
+            # trading_days = trading_calendar.get_default_trade_date()
+            # logger.info(f"当前交易日期: {trading_days}")
+
+            OUTPUT_PATH = f"./output"
+
+            # 获取output目录下最新日期,必须是文件夹且是日期格式YYYYMMDD
+            latest_date = max(os.listdir(OUTPUT_PATH), key=lambda x: x if x.isdigit() else '0')
+            BASE_PATH = f"./output/{latest_date}/"
             
             # 1. 处理核心股票池
             try:
                 logger.info("开始处理核心股票池")
-                core_stocks_file = f'{OUTPUT_BASE_DIR}/{trading_days}/core_stocks.csv'
+                core_stocks_file = f'{BASE_PATH}/core_stocks.csv'
                 
                 # 检查文件是否存在
-                import os
                 if not os.path.exists(core_stocks_file):
                     logger.error(f"核心股票池文件不存在: {core_stocks_file}")
                     raise FileNotFoundError(f"核心股票池文件不存在: {core_stocks_file}")
@@ -574,7 +587,7 @@ def main():
             # 2. 处理首板股票池
             try:
                 logger.info("开始处理首板股票池")
-                first_stocks_file = f'{OUTPUT_BASE_DIR}/{trading_days}/first_stocks.csv'
+                first_stocks_file = f'{BASE_PATH}/first_stocks.csv'
                 
                 # 检查文件是否存在
                 if not os.path.exists(first_stocks_file):
@@ -620,4 +633,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    get_stock_info()
+    # print(StockInfo().get_news('江西铜业'))

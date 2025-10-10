@@ -12,7 +12,7 @@ from trading_calendar import TradingCalendar
 from notification import DingDingRobot
 from merge import merge
 from utils import check_file_exists_after_time
-
+from info import get_stock_info
 
 # 配置日志
 logger = get_logger("main", "logs", "daily_research.log")
@@ -59,6 +59,9 @@ def main():
     """
     主函数，包含重试机制
     """
+     # 获取交易日期
+    trading_date = trading_calendar.get_default_trade_date()
+    today = datetime.now().strftime('%Y%m%d')
     start_time = datetime.now()
     
     for retry_count in range(MAX_RETRIES):
@@ -66,12 +69,11 @@ def main():
             if retry_count > 0:
                 logger.info(f"开始执行主流程 (第{retry_count}次重试)")
             
-            # 获取交易日期
-            trading_date = trading_calendar.get_default_trade_date()
-            today = datetime.now().strftime('%Y%m%d')
-            # if trading_date != today:
-            #     logger.warning(f"今天 {today} 不是交易日，跳过执行")
-            #     return
+           
+            if not trading_calendar.is_trading_day(today):
+                logger.warning(f"今天 {today} 不是交易日，跳过执行")
+                dingding_robot.send_message(f"今天 {today} 不是交易日，跳过执行", 'robot3')
+                return
 
             if check_result_files_exist(trading_date):
                 logger.warning(f"交易日 {trading_date} 的关键结果文件已存在，跳过执行")
@@ -131,6 +133,16 @@ def main():
                 dingding_robot.send_message(f"合并数据失败: {e}", 'robot3')
                 raise
             
+            # 6. 获取股票信息
+            try:
+                logger.info("开始获取股票信息")
+                get_stock_info()
+                logger.info("股票信息获取完成")
+            except Exception as e:
+                logger.error(f"获取股票信息失败: {e}")
+                dingding_robot.send_message(f"获取股票信息失败: {e}", 'robot3')
+                raise
+
             # 执行完成，发送成功通知
             end_time = datetime.now()
             duration = end_time - start_time

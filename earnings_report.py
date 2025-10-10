@@ -1,11 +1,14 @@
 import pandas as pd
 import akshare as ak
 import os
+from log_setup import get_logger
 from notification import DingDingRobot
 from utils import execute_with_retry
 dingding_robot = DingDingRobot()
+logger = get_logger("earnings_report", "logs", "earnings_report.log")
 DEFAULT_DATA_DIR = './data'
 def main():
+    logger.info("开始执行三季报业绩预增股票")
     try:
         '''
         三季报业绩预增股票20250930
