@@ -210,7 +210,7 @@ def display_latest_jygs_data():
         formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
         
         # 加载数据
-        df = pd.read_csv(file_path, dtype={'交易日期': str})
+        df = pd.read_csv(file_path, dtype={'交易日期': str, 'code': str})
         
         st.subheader(f"📈 最新异动股票 ({formatted_date})")
         st.markdown("当日市场异动股票详情，包括涨停时间、异动原因和热点分析")
@@ -261,8 +261,7 @@ def display_latest_jygs_data():
                 'code': '股票代码'
             })
             
-            # 限制异动原因长度以便显示
-            show_df['异动原因'] = show_df['异动原因'].str[:50] + '...'
+            # 保持异动原因完整显示
             
             st.dataframe(
                 show_df,
