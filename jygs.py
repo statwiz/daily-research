@@ -132,7 +132,6 @@ class JygsUtils:
                 for stock in item['list']:
                     action_info = stock['article']['action_info']
                     expound_parts = action_info['expound'].split('\n')
-                    
                     stocks_data.append({
                         '股票简称': stock['name'],
                         'code': stock['code'][2:].zfill(6),  # 去掉前缀并确保6位字符串格式
@@ -141,7 +140,9 @@ class JygsUtils:
                         '解析': '\n'.join(expound_parts[1:]) if len(expound_parts) > 1 else '',
                         '热点': hotspot_name,
                         '热点导火索': hotspot_reason,
-                        '交易日期': trading_date
+                        '交易日期': trading_date,
+                        'shares_range': round(float(action_info['shares_range'])/ 100,2),
+                        'num': action_info['num']
                     })
             
             df = pd.DataFrame(stocks_data)

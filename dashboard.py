@@ -253,12 +253,14 @@ def display_latest_jygs_data():
         st.info(f"显示 {len(display_df)} 只股票")
         
         # 优化显示的列
-        display_columns = ['股票简称', 'code', 'zt_time', '热点', '异动原因']
+        display_columns = ['股票简称', 'code', 'shares_range', 'num', 'zt_time', '热点', '异动原因']
         if all(col in display_df.columns for col in display_columns):
             show_df = display_df[display_columns].copy()
             show_df = show_df.rename(columns={
                 'zt_time': '涨停时间',
-                'code': '股票代码'
+                'code': '股票代码',
+                'shares_range': '涨跌(%)',
+                'num': '楼层'
             })
             
             # 保持异动原因完整显示
