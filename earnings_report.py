@@ -14,7 +14,7 @@ def main():
         三季报业绩预增股票20250930
         '''
         stock_yjyg_em_df = execute_with_retry(ak.stock_yjyg_em, date="20250930")
-        cond = (stock_yjyg_em_df['预测指标']=='扣除非经常性损益后的净利润') & (stock_yjyg_em_df['预告类型']=='预增')
+        cond = (stock_yjyg_em_df['预测指标']=='归属于上市公司股东的净利润') & (stock_yjyg_em_df['预告类型']=='预增')
         stock_yjyg_em_df = stock_yjyg_em_df[cond]
         output_columns = ['股票简称', '业绩变动幅度','预测数值', '公告日期']
 
@@ -46,11 +46,11 @@ def main():
                 msg_lines.append(f"   公告日期: {announce_date}")
             
             msg = "\n".join(msg_lines)
-            print(msg)
+            logger.info(msg)
             # 发送到钉钉
             dingding_robot.send_message(msg, 'robot4')
         else:
-            print("没有新增业绩预增股票")
+            logger.info("没有新增业绩预增股票")
         # 保存数据
         xlsx_dir = os.path.join(DEFAULT_DATA_DIR, "xlsx")
         os.makedirs(xlsx_dir, exist_ok=True)

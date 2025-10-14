@@ -172,6 +172,149 @@ def filter_data(df):
     filtered_df = df[~df['热点'].isin(exclude_hotspots)]
     return filtered_df
 
+def get_latest_jygs_file():
+    """获取最新交易日的jygs文件路径"""
+    jygs_dir = "./data/csv/jygs/"
+    if not os.path.exists(jygs_dir):
+        return None
+    
+    # 获取所有jygs_日期.csv文件
+    jygs_files = []
+    for file in os.listdir(jygs_dir):
+        if file.startswith('jygs_') and file.endswith('.csv') and file != 'jygs_bk_his.csv' and file != 'jygs.csv':
+            # 提取日期部分
+            date_str = file[5:13]  # jygs_20251014.csv -> 20251014
+            if date_str.isdigit() and len(date_str) == 8:
+                jygs_files.append((date_str, file))
+    
+    if not jygs_files:
+        return None
+    
+    # 按日期排序，取最新的
+    jygs_files.sort(key=lambda x: x[0], reverse=True)
+    latest_file = jygs_files[0][1]
+    return os.path.join(jygs_dir, latest_file)
+
+def display_latest_jygs_data():
+    """展示最新交易日的异动股票数据"""
+    file_path = get_latest_jygs_file()
+    
+    if file_path is None or not os.path.exists(file_path):
+        st.warning("未找到最新的异动股票数据文件")
+        return
+    
+    try:
+        # 从文件名提取日期
+        file_name = os.path.basename(file_path)
+        date_str = file_name[5:13]  # jygs_20251014.csv -> 20251014
+        formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        
+        # 加载数据
+        df = pd.read_csv(file_path, dtype={'交易日期': str})
+        
+        st.subheader(f"📈 最新异动股票 ({formatted_date})")
+        st.markdown("当日市场异动股票详情，包括涨停时间、异动原因和热点分析")
+        
+        if len(df) == 0:
+            st.info("当日无异动股票")
+            return
+        
+        # 显示统计信息
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("异动股票数量", len(df))
+        with col2:
+            unique_hotspots = df['热点'].nunique()
+            st.metric("涉及热点数", unique_hotspots)
+        with col3:
+            # 统计上午和下午异动的股票
+            if 'zt_time' in df.columns:
+                morning_count = len(df[df['zt_time'] < '12:00:00'])
+                st.metric("上午异动", morning_count)
+        with col4:
+            if 'zt_time' in df.columns:
+                afternoon_count = len(df[df['zt_time'] >= '12:00:00'])
+                st.metric("下午异动", afternoon_count)
+        
+        # 热点筛选器
+        st.markdown("**热点筛选：**")
+        hotspots = ['全部'] + sorted(df['热点'].unique().tolist())
+        selected_hotspot = st.selectbox(
+            "选择热点类别:",
+            options=hotspots,
+            key="jygs_hotspot_filter"
+        )
+        
+        # 过滤数据
+        display_df = df.copy()
+        if selected_hotspot != '全部':
+            display_df = df[df['热点'] == selected_hotspot]
+        
+        st.info(f"显示 {len(display_df)} 只股票")
+        
+        # 优化显示的列
+        display_columns = ['股票简称', 'code', 'zt_time', '热点', '异动原因']
+        if all(col in display_df.columns for col in display_columns):
+            show_df = display_df[display_columns].copy()
+            show_df = show_df.rename(columns={
+                'zt_time': '涨停时间',
+                'code': '股票代码'
+            })
+            
+            # 限制异动原因长度以便显示
+            show_df['异动原因'] = show_df['异动原因'].str[:50] + '...'
+            
+            st.dataframe(
+                show_df,
+                use_container_width=True,
+                height=400
+            )
+        else:
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                height=400
+            )
+        
+        # 详细信息查看
+        st.markdown("**详细信息查看：**")
+        if len(display_df) > 0:
+            selected_index = st.selectbox(
+                "选择股票查看详细信息:",
+                options=range(len(display_df)),
+                format_func=lambda x: f"{display_df.iloc[x]['股票简称']} ({display_df.iloc[x]['code']}) - {display_df.iloc[x]['热点']}",
+                key="jygs_detail_select"
+            )
+            
+            if selected_index is not None:
+                selected_row = display_df.iloc[selected_index]
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**股票名称：** {selected_row['股票简称']}")
+                    st.write(f"**股票代码：** {selected_row['code']}")
+                    st.write(f"**涨停时间：** {selected_row['zt_time']}")
+                    st.write(f"**热点：** {selected_row['热点']}")
+                
+                with col2:
+                    if '热点导火索' in selected_row and pd.notna(selected_row['热点导火索']):
+                        st.write(f"**热点导火索：** {selected_row['热点导火索']}")
+                
+                st.markdown("**异动原因：**")
+                st.write(selected_row['异动原因'])
+                
+                if '解析' in selected_row and pd.notna(selected_row['解析']):
+                    st.markdown("**详细解析：**")
+                    st.write(selected_row['解析'])
+        
+        # 热点分布图
+        if '热点' in display_df.columns and len(display_df) > 0:
+            st.markdown("**当日异动热点分布：**")
+            plot_hotspot_distribution(display_df, f"{formatted_date} 异动股票热点分布")
+        
+    except Exception as e:
+        st.error(f"加载异动股票数据失败: {e}")
+
 def plot_hotspot_rotation(df):
     """绘制热点轮动图表"""
     if df is None or df.empty:
@@ -619,6 +762,12 @@ def show_hotspot_rotation():
         
         # 绘制热点轮动图
         plot_hotspot_rotation(unified_data)
+        
+        # 添加分隔线
+        st.markdown("---")
+        
+        # 展示最新异动股票
+        display_latest_jygs_data()
     else:
         st.error("无法加载数据，请检查文件路径和格式")
 
