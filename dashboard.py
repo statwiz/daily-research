@@ -534,7 +534,7 @@ def plot_hotspot_distribution(df, title="热点分布"):
     
     st.plotly_chart(fig, use_container_width=True)
 
-def display_csv_data(file_path, title, description="", show_industry_chart=False, show_hotspot_chart=False):
+def display_csv_data(file_path, title, description="", show_industry_chart=False, show_hotspot_chart=False, enable_filters=False):
     """展示CSV文件数据"""
     if not os.path.exists(file_path):
         st.warning(f"{title}数据文件不存在")
@@ -547,6 +547,37 @@ def display_csv_data(file_path, title, description="", show_industry_chart=False
         st.subheader(f"📊 {title}")
         if description:
             st.markdown(description)
+        
+        # 筛选功能
+        if enable_filters:
+            st.markdown("**数据筛选：**")
+            col_filter1, col_filter2 = st.columns(2)
+            
+            with col_filter1:
+                # 热点筛选
+                if '热点' in df.columns:
+                    hotspots = ['全部'] + sorted(df['热点'].unique().tolist())
+                    selected_hotspot = st.selectbox(
+                        "选择热点类别:",
+                        options=hotspots,
+                        key=f"hotspot_filter_{title}"
+                    )
+                    
+                    if selected_hotspot != '全部':
+                        df = df[df['热点'] == selected_hotspot]
+            
+            with col_filter2:
+                # 市值筛选
+                if '市值Z' in df.columns:
+                    market_cap_options = ['全部', '>50亿']
+                    selected_market_cap = st.selectbox(
+                        "选择市值条件:",
+                        options=market_cap_options,
+                        key=f"market_cap_filter_{title}"
+                    )
+                    
+                    if selected_market_cap == '>50亿':
+                        df = df[df['市值Z'] > 50]
         
         # 显示基本统计信息
         col1, col2, col3 = st.columns(3)
@@ -808,23 +839,23 @@ def show_stock_pool_data():
     
     
     # 创建标签页
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(["高位股票池", "低位股票池", "新增股票", "移除股票", "新兴热点", "香港股票池", "美国股票池", "高位股票信息", "低位股票信息"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(["高位股票池", "新增股票", "移除股票", "低位股票池", "新兴热点", "香港股票池", "美国股票池", "高位股票信息", "低位股票信息"])
     
     with tab1:
         file_path = os.path.join(BASE_PATH, "core_stocks.csv")
-        display_csv_data(file_path, "高位股票池", files_config["core_stocks.csv"]["description"], show_hotspot_chart=True)
+        display_csv_data(file_path, "高位股票池", files_config["core_stocks.csv"]["description"], show_hotspot_chart=True, enable_filters=True)
     
     with tab2:
-        file_path = os.path.join(BASE_PATH, "first_stocks.csv")
-        display_csv_data(file_path, "低位股票池", files_config["first_stocks.csv"]["description"], show_hotspot_chart=True)
+        file_path = os.path.join(BASE_PATH, "add.csv")
+        display_csv_data(file_path, "新增股票", files_config["add.csv"]["description"], show_hotspot_chart=True, enable_filters=True)
     
     with tab3:
-        file_path = os.path.join(BASE_PATH, "add.csv")
-        display_csv_data(file_path, "新增股票", files_config["add.csv"]["description"], show_hotspot_chart=True)
+        file_path = os.path.join(BASE_PATH, "remove.csv") 
+        display_csv_data(file_path, "移除股票", files_config["remove.csv"]["description"], show_hotspot_chart=True, enable_filters=True)
     
     with tab4:
-        file_path = os.path.join(BASE_PATH, "remove.csv") 
-        display_csv_data(file_path, "移除股票", files_config["remove.csv"]["description"], show_hotspot_chart=True)
+        file_path = os.path.join(BASE_PATH, "first_stocks.csv")
+        display_csv_data(file_path, "低位股票池", files_config["first_stocks.csv"]["description"], show_hotspot_chart=True, enable_filters=True)
     
     with tab5:
         file_path = os.path.join(BASE_PATH, "emerging_hotspots.csv")

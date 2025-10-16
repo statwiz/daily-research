@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils import execute_with_retry
 
 # 公告分类字典
@@ -90,14 +91,65 @@ class AkShare:
             logging.error(error_msg)
             raise Exception(error_msg)
 
+    def _get_single_concept_data(self, name: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """获取单个概念板块数据的辅助函数"""
+        df = execute_with_retry(ak.xx, symbol=name, start_date=start_date, end_date=end_date)
+        df['name'] = name
+        print(f"成功获取{name}概念板块{len(df)}条数据")
+        return df
+    
+    # 获取同花顺概念版块数据
+    def get_concept_board(self, start_date: str, end_date: str) -> pd.DataFrame:
+        """获取同花顺概念版块数据"""
+        df_concept = execute_with_retry(ak.stock_board_concept_name_ths)
+        if df_concept is None or df_concept.empty:
+            print(f"概念板块名称为空")
+            raise Exception(f"概念板块名称为空")  
+        print(f"概念板块名称数量: {len(df_concept)}")
+      
+        concept_list = df_concept['name'].tolist()       
+        df_all_list = []
+        
+        # 使用线程池并发获取数据，限制并发数为8
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            # 提交所有任务
+            future_to_name = {
+                executor.submit(self._get_single_concept_data, name, start_date, end_date): name 
+                for name in concept_list
+            }
+            
+            # 获取结果
+            for future in as_completed(future_to_name):
+                name = future_to_name[future]
+                try:
+                    df = future.result()
+                    df_all_list.append(df)
+                except Exception as e:
+                    print(f"获取{name}概念板块数据失败: {e}")
+                    logging.error(f"获取{name}概念板块数据失败: {e}")
+        
+        if not df_all_list:
+            raise Exception("所有概念板块数据获取失败")
+            
+        df_all = pd.concat(df_all_list)
+        # 按日期倒排
+        df_all = df_all.sort_values(by='日期', ascending=False)
+        return df_all
+    
+  
+
 
 # 使用示例
 if __name__ == "__main__":
     akshare = AkShare()
     try:
-        df = akshare.get_announcements('20250930')
-        print(f"成功获取{len(df)}条公告数据")
-        df.to_csv('./output/announcements.csv', index=False)
-        print(f"公告数据保存完成")
+        # df = akshare.get_announcements('20250930')
+        # print(f"成功获取{len(df)}条公告数据")
+        # df.to_csv('./output/announcements.csv', index=False)
+        # print(f"公告数据保存完成")
+        df = akshare.get_concept_board('20250910', '20251014')
+        # df.to_csv('./output/concept_board.csv', index=False)
+        # print(f"概念版块数据保存完成")
+
     except Exception as e:
         print(f"执行失败: {e}")
